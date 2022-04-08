@@ -36,6 +36,7 @@ import (
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery"
 	"github.com/prometheus/prometheus/notifier"
+	alertLabels "github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/rules"
 	"github.com/prometheus/prometheus/storage"
@@ -77,6 +78,7 @@ type ClickHouseReader struct {
 	ruleManager     *rules.Manager
 	promConfig      *config.Config
 	alertManager    am.Manager
+	startedAt       time.Time
 }
 
 // NewTraceReader returns a TraceReader for the database
@@ -100,6 +102,7 @@ func NewReader(localDB *sqlx.DB) *ClickHouseReader {
 		operationsTable: options.primary.OperationsTable,
 		indexTable:      options.primary.IndexTable,
 		errorTable:      options.primary.ErrorTable,
+		startedAt:       time.Now(),
 	}
 }
 
@@ -199,9 +202,10 @@ func (r *ClickHouseReader) Start() {
 	queryEngine := promql.NewEngine(opts)
 
 	ruleManager := rules.NewManager(&rules.ManagerOptions{
-		Appendable:      fanoutStorage,
-		TSDB:            localStorage,
-		QueryFunc:       rules.EngineQueryFunc(queryEngine, fanoutStorage),
+		Appendable: fanoutStorage,
+		TSDB:       localStorage,
+		// QueryFunc:       rules.EngineQueryFunc(queryEngine, fanoutStorage),
+		QueryFunc:       RuleFilterFunc(r),
 		NotifyFunc:      sendAlerts(notifier, ExternalURL.String()),
 		Context:         context.Background(),
 		ExternalURL:     ExternalURL,
@@ -548,6 +552,48 @@ func (s byAlertStateAndNameSorter) Swap(i, j int) {
 type AlertingRuleWithGroup struct {
 	rules.AlertingRule
 	Id int
+}
+
+func RuleFilterFunc(reader *ClickHouseReader) rules.QueryFunc {
+	return func(ctx context.Context, qs string, t time.Time) (promql.Vector, error) {
+		// query clickhouse here
+		// q, err := reader.NewInstantQuery(q, qs, t)
+		// if err != nil {
+		//	return nil, err
+		// }
+		// res := q.Exec(ctx)
+		// if res.Err != nil {
+		//	return nil, res.Err
+		//}
+		if time.Now().After(reader.startedAt.Add(1 * time.Minute)) {
+			fmt.Println("Resolving the alert")
+			return nil, nil
+		}
+		fmt.Println("firing the alert")
+		return promql.Vector{
+			promql.Sample{
+				Point: promql.Point{T: t.Unix(), V: 1},
+				Metric: alertLabels.Labels{
+					alertLabels.Label{
+						Name:  "service_name",
+						Value: "goApp",
+					},
+				},
+			},
+		}, nil
+
+		// switch v := res.Value.(type) {
+		// case promql.Vector:
+		//	return v, nil
+		//case promql.Scalar:
+		//	return promql.Vector{promql.Sample{
+		//		Point:  promql.Point(v),
+		//		Metric: labels.Labels{},
+		//	}}, nil
+		// default:
+		//	return nil, errors.New("rule result is not a vector or scalar")
+		//}
+	}
 }
 
 func (r *ClickHouseReader) GetRulesFromDB() (*[]model.RuleResponseItem, *model.ApiError) {
