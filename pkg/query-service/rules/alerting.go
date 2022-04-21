@@ -4,19 +4,19 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/influxdata/promql/v2"
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/timestamp"
-	"github.com/prometheus/prometheus/template"
+	"github.com/prometheus/prometheus/promql"
+	"go.signoz.io/query-service/utils/rulefmt"
+	"go.signoz.io/query-service/utils/timestamp"
+	yaml "gopkg.in/yaml.v2"
 )
 
 const (
@@ -26,11 +26,20 @@ const (
 	// AlertForStateMetricName is the metric name for 'for' state of alert.
 	alertForStateMetricName = "ALERTS_FOR_STATE"
 
+	// todo(amol)
 	// AlertNameLabel is the label name indicating the name of an alert.
-	alertNameLabel = "alertname"
+	// alertNameLabel = "alertname"
 
 	// AlertStateLabel is the label name indicating the state of an alert.
 	alertStateLabel = "alertstate"
+)
+
+type RuleHealth string
+
+const (
+	HealthUnknown RuleHealth = "unknown"
+	HealthGood    RuleHealth = "ok"
+	HealthBad     RuleHealth = "err"
 )
 
 // AlertState denotes the state of an active alert.
@@ -68,20 +77,22 @@ type Alert struct {
 	ValidUntil time.Time
 }
 
+type Expr interface {
+	String() string
+}
+
 type AlertingRule struct {
 	name string
-	// rule string json
-	// ruleConditions[]
-
-	query string
+	// The vector expression from which to generate alerts.
+	vector promql.Expr
 
 	holdDuration time.Duration
 	labels       labels.Labels
 	annotations  labels.Labels
 
-	// external labels and url from global config
-	externalLabels map[string]string
-	externalURL    string
+	// todo(amol): external labels and url from global config
+	// externalLabels map[string]string
+	// externalURL    string
 
 	// true if old state has been restored. We start persisting samples for ALERT_FOR_STATE
 	// only after the restoration.
@@ -102,26 +113,19 @@ type AlertingRule struct {
 }
 
 func NewAlertingRule(
-	name string, hold time.Duration, labels, annotations, externalLabels labels.Labels,
-	externalURL string, restored bool, logger log.Logger,
+	name string, vec promql.Expr, hold time.Duration, labels, annotations labels.Labels, restored bool, logger log.Logger,
 ) *AlertingRule {
-	el := make(map[string]string, len(externalLabels))
-	for _, lbl := range externalLabels {
-		el[lbl.Name] = lbl.Value
-	}
 
 	return &AlertingRule{
-		name: name,
-		// TODO: rule conditions
-		holdDuration:   hold,
-		labels:         labels,
-		annotations:    annotations,
-		externalLabels: el,
-		externalURL:    externalURL,
-		health:         HealthUnknown,
-		active:         map[uint64]*Alert{},
-		logger:         logger,
-		restored:       restored,
+		name:         name,
+		vector:       vec,
+		holdDuration: hold,
+		labels:       labels,
+		annotations:  annotations,
+		health:       HealthUnknown,
+		active:       map[uint64]*Alert{},
+		logger:       logger,
+		restored:     restored,
 	}
 }
 
@@ -178,7 +182,7 @@ func (r *AlertingRule) Annotations() labels.Labels {
 	return r.annotations
 }
 
-func (r *AlertingRule) sample(alert *Alert, ts time.Time) promql.Sample {
+func (r *AlertingRule) sample(alert *Alert, ts time.Time) Sample {
 	lb := labels.NewBuilder(r.labels)
 
 	for _, l := range alert.Labels {
@@ -197,7 +201,7 @@ func (r *AlertingRule) sample(alert *Alert, ts time.Time) promql.Sample {
 }
 
 // forStateSample returns the sample for ALERTS_FOR_STATE.
-func (r *AlertingRule) forStateSample(alert *Alert, ts time.Time, v float64) promql.Sample {
+func (r *AlertingRule) forStateSample(alert *Alert, ts time.Time, v float64) Sample {
 	lb := labels.NewBuilder(r.labels)
 
 	for _, l := range alert.Labels {
@@ -316,12 +320,11 @@ func (r *AlertingRule) sendAlerts(ctx context.Context, ts time.Time, resendDelay
 			alerts = append(alerts, &anew)
 		}
 	})
-	// todo: handle query
-	notifyFunc(ctx, r.query, alerts...)
+	notifyFunc(ctx, r.vector.String(), alerts...)
 }
 
 func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, externalURL *url.URL) (Vector, error) {
-	res, err := query(ctx, r.query, ts)
+	res, err := query(ctx, r.vector.String(), ts)
 	if err != nil {
 		r.SetHealth(HealthBad)
 		r.SetLastError(err)
@@ -341,22 +344,20 @@ func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, 
 			l[lbl.Name] = lbl.Value
 		}
 
-		tmplData := template.AlertTemplateData(l, r.externalLabels, r.externalURL, smpl.V)
-		defs := []string{
-			"{{$labels := .Labels}}",
-			"{{$externalLabels := .ExternalLabels}}",
-			"{{$externalURL := .ExternalURL}}",
-			"{{$value := .Value}}",
-		}
+		tmplData := AlertTemplateData(l, smpl.V)
+		// Inject some convenience variables that are easier to remember for users
+		// who are not used to Go's templating system.
+		defs := "{{$labels := .Labels}}{{$value := .Value}}"
 
 		expand := func(text string) string {
-			tmpl := template.NewTemplateExpander(
+
+			tmpl := NewTemplateExpander(
 				ctx,
-				strings.Join(append(defs, text), ""),
+				defs+text,
 				"__alert_"+r.Name(),
 				tmplData,
 				model.Time(timestamp.FromTime(ts)),
-				template.QueryFunc(query),
+				QueryFunc(query),
 				externalURL,
 			)
 			result, err := tmpl.Expand()
@@ -445,4 +446,21 @@ func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, 
 	r.lastError = err
 	return vec, nil
 
+}
+
+func (r *AlertingRule) String() string {
+	ar := rulefmt.Rule{
+		Alert:       r.name,
+		Expr:        r.vector.String(),
+		For:         model.Duration(r.holdDuration),
+		Labels:      r.labels.Map(),
+		Annotations: r.annotations.Map(),
+	}
+
+	byt, err := yaml.Marshal(ar)
+	if err != nil {
+		return fmt.Sprintf("error marshaling alerting rule: %s", err.Error())
+	}
+
+	return string(byt)
 }

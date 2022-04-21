@@ -2,6 +2,7 @@ package rules
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/url"
 	"sort"
@@ -12,21 +13,14 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/pkg/timestamp"
 	"github.com/prometheus/prometheus/pkg/value"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
+	"go.signoz.io/query-service/utils/timestamp"
 
 	opentracing "github.com/opentracing/opentracing-go"
-)
-
-type RuleHealth string
-
-const (
-	HealthUnknown RuleHealth = "unknown"
-	HealthGood    RuleHealth = "ok"
-	HealthBad     RuleHealth = "err"
 )
 
 // namespace for prom metrics
@@ -120,6 +114,7 @@ type Group struct {
 	staleSeries          []labels.Labels
 	opts                 *ManagerOptions
 	mtx                  sync.Mutex
+	evaluationDuration   time.Duration
 	evaluationTime       time.Duration
 	lastEvaluation       time.Time
 
@@ -133,35 +128,25 @@ type Group struct {
 	logger log.Logger
 }
 
-type GroupOptions struct {
-	Name          string
-	File          string
-	Interval      time.Duration
-	Rules         []Rule
-	ShouldRestore bool
-	Opts          *ManagerOptions
-	done          chan struct{}
-}
-
 func groupKey(name, file string) string {
 	// TODO: address ; in the group key for existing deployments
 	return name + ";" + file
 }
 
 // NewGroup makes a new Group with the given name, options, and rules.
-func NewGroup(o GroupOptions) *Group {
+func NewGroup(name, file string, interval time.Duration, rules []Rule, shouldRestore bool, opts *ManagerOptions) *Group {
+	fmt.Println("rules: ", rules)
 	return &Group{
-		name:                 o.Name,
-		file:                 o.File,
-		interval:             o.Interval,
-		rules:                o.Rules,
-		shouldRestore:        o.ShouldRestore,
-		opts:                 o.Opts,
-		seriesInPreviousEval: make([]map[string]labels.Labels, len(o.Rules)),
+		name:                 name,
+		file:                 file,
+		interval:             interval,
+		rules:                rules,
+		shouldRestore:        shouldRestore,
+		opts:                 opts,
+		seriesInPreviousEval: make([]map[string]labels.Labels, len(rules)),
 		done:                 make(chan struct{}),
-		managerDone:          o.done,
 		terminated:           make(chan struct{}),
-		logger:               log.With(o.Opts.Logger, "group", o.Name),
+		logger:               log.With(opts.Logger, "group", name),
 	}
 }
 
@@ -248,8 +233,9 @@ func (g *Group) run(ctx context.Context) {
 		case <-tick.C:
 			missed := (time.Since(evalTimestamp) / g.interval) - 1
 			if missed > 0 {
-				g.metrics.IterationsMissed.WithLabelValues(GroupKey(g.file, g.name)).Add(float64(missed))
-				g.metrics.IterationsScheduled.WithLabelValues(GroupKey(g.file, g.name)).Add(float64(missed))
+				iterationsMissed.Add(float64(missed))
+				iterationsScheduled.Add(float64(missed))
+
 			}
 			evalTimestamp = evalTimestamp.Add((missed + 1) * g.interval)
 			iter()
@@ -271,8 +257,8 @@ func (g *Group) run(ctx context.Context) {
 			case <-tick.C:
 				missed := (time.Since(evalTimestamp) / g.interval) - 1
 				if missed > 0 {
-					g.metrics.IterationsMissed.WithLabelValues(GroupKey(g.file, g.name)).Add(float64(missed))
-					g.metrics.IterationsScheduled.WithLabelValues(GroupKey(g.file, g.name)).Add(float64(missed))
+					iterationsMissed.Add(float64(missed))
+					iterationsScheduled.Add(float64(missed))
 				}
 				evalTimestamp = evalTimestamp.Add((missed + 1) * g.interval)
 				iter()
@@ -324,6 +310,20 @@ func (g *Group) HasAlertingRules() bool {
 	return false
 }
 
+// GetEvaluationDuration returns the time in seconds it took to evaluate the rule group.
+func (g *Group) GetEvaluationDuration() time.Duration {
+	g.mtx.Lock()
+	defer g.mtx.Unlock()
+	return g.evaluationDuration
+}
+
+// SetEvaluationDuration sets the time in seconds the last evaluation took.
+func (g *Group) SetEvaluationDuration(dur time.Duration) {
+	g.mtx.Lock()
+	defer g.mtx.Unlock()
+	g.evaluationDuration = dur
+}
+
 // GetEvaluationTime returns the time in seconds it took to evaluate the rule group.
 func (g *Group) GetEvaluationTime() time.Duration {
 	g.mtx.Lock()
@@ -333,8 +333,6 @@ func (g *Group) GetEvaluationTime() time.Duration {
 
 // setEvaluationTime sets the time in seconds the last evaluation took.
 func (g *Group) setEvaluationTime(dur time.Duration) {
-	g.metrics.GroupLastDuration.WithLabelValues(GroupKey(g.file, g.name)).Set(dur.Seconds())
-
 	g.mtx.Lock()
 	defer g.mtx.Unlock()
 	g.evaluationTime = dur
@@ -349,8 +347,6 @@ func (g *Group) GetLastEvaluation() time.Time {
 
 // setLastEvaluation updates evaluationTimestamp to the timestamp of when the rule group was last evaluated.
 func (g *Group) setLastEvaluation(ts time.Time) {
-	g.metrics.GroupLastEvalTime.WithLabelValues(GroupKey(g.file, g.name)).Set(float64(ts.UnixNano()) / 1e9)
-
 	g.mtx.Lock()
 	defer g.mtx.Unlock()
 	g.lastEvaluation = ts
@@ -380,7 +376,7 @@ func (g *Group) CopyState(from *Group) {
 	g.lastEvaluation = from.lastEvaluation
 
 	ruleMap := make(map[string][]int, len(from.rules))
-
+	fmt.Println("group copy:", from.rules[0])
 	for fi, fromRule := range from.rules {
 		nameAndLabels := nameAndLabels(fromRule)
 		l := ruleMap[nameAndLabels]
@@ -428,6 +424,9 @@ func (g *Group) CopyState(from *Group) {
 func (g *Group) Eval(ctx context.Context, ts time.Time) {
 	var samplesTotal float64
 	for i, rule := range g.rules {
+		if rule == nil {
+			continue
+		}
 		select {
 		case <-g.done:
 			return
@@ -436,23 +435,24 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 
 		func(i int, rule Rule) {
 			sp, ctx := opentracing.StartSpanFromContext(ctx, "rule")
+			fmt.Println("R:", rule)
 			sp.SetTag("name", rule.Name())
 			defer func(t time.Time) {
 				sp.Finish()
 
 				since := time.Since(t)
-				g.metrics.EvalDuration.Observe(since.Seconds())
+				evalDuration.Observe(since.Seconds())
 				rule.SetEvaluationDuration(since)
 				rule.SetEvaluationTimestamp(t)
 			}(time.Now())
 
-			g.metrics.EvalTotal.WithLabelValues(GroupKey(g.File(), g.Name())).Inc()
+			evalTotal.Inc()
 
 			vector, err := rule.Eval(ctx, ts, g.opts.QueryFunc, g.opts.ExternalURL)
 			if err != nil {
 				rule.SetHealth(HealthBad)
 				rule.SetLastError(err)
-				g.metrics.EvalFailures.WithLabelValues(GroupKey(g.File(), g.Name())).Inc()
+				evalFailures.Inc()
 
 				// Canceled queries are intentional termination of queries. This normally
 				// happens on shutdown and thus we skip logging of any errors here.
@@ -471,13 +471,13 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 				numDuplicates = 0
 			)
 
-			app := g.opts.Appendable.Appender(ctx)
+			app, _ := g.opts.Appendable.Appender()
 			seriesReturned := make(map[string]labels.Labels, len(g.seriesInPreviousEval[i]))
 			defer func() {
 				if err := app.Commit(); err != nil {
 					rule.SetHealth(HealthBad)
 					rule.SetLastError(err)
-					g.metrics.EvalFailures.WithLabelValues(GroupKey(g.File(), g.Name())).Inc()
+					evalFailures.Inc()
 
 					level.Warn(g.logger).Log("msg", "Rule sample appending failed", "err", err)
 					return
@@ -486,7 +486,7 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 			}()
 
 			for _, s := range vector {
-				if _, err := app.Append(0, s.Metric, s.T, s.V); err != nil {
+				if _, err := app.Add(s.Metric, s.T, s.V); err != nil {
 					rule.SetHealth(HealthBad)
 					rule.SetLastError(err)
 
@@ -514,7 +514,7 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 			for metric, lset := range g.seriesInPreviousEval[i] {
 				if _, ok := seriesReturned[metric]; !ok {
 					// Series no longer exposed, mark it stale.
-					_, err = app.Append(0, lset, timestamp.FromTime(ts), math.Float64frombits(value.StaleNaN))
+					_, err = app.Add(lset, timestamp.FromTime(ts), math.Float64frombits(value.StaleNaN))
 					switch errors.Cause(err) {
 					case nil:
 					case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:
@@ -527,14 +527,153 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 			}
 		}(i, rule)
 	}
-	if g.metrics != nil {
-		g.metrics.GroupSamples.WithLabelValues(GroupKey(g.File(), g.Name())).Set(samplesTotal)
-	}
 	g.cleanupStaleSeries(ctx, ts)
 }
 
-// TODO(amol): find out what is restore for state
+func (g *Group) cleanupStaleSeries(ctx context.Context, ts time.Time) {
+	if len(g.staleSeries) == 0 {
+		return
+	}
+	app, _ := g.opts.Appendable.Appender()
+	for _, s := range g.staleSeries {
+		// Rule that produced series no longer configured, mark it stale.
+		_, err := app.Add(s, timestamp.FromTime(ts), math.Float64frombits(value.StaleNaN))
+		switch errors.Cause(err) {
+		case nil:
+		case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:
+			// Do not count these in logging, as this is expected if series
+			// is exposed from a different rule.
+		default:
+			level.Warn(g.logger).Log("msg", "Adding stale sample for previous configuration failed", "sample", s, "err", err)
+		}
+	}
+	if err := app.Commit(); err != nil {
+		level.Warn(g.logger).Log("msg", "Stale sample appending for previous configuration failed", "err", err)
+	} else {
+		g.staleSeries = nil
+	}
+}
+
+// RestoreForState restores the 'for' state of the alerts
+// by looking up last ActiveAt from storage.
 func (g *Group) RestoreForState(ts time.Time) {
+	maxtMS := int64(model.TimeFromUnixNano(ts.UnixNano()))
+	// We allow restoration only if alerts were active before after certain time.
+	mint := ts.Add(-g.opts.OutageTolerance)
+	mintMS := int64(model.TimeFromUnixNano(mint.UnixNano()))
+	q, err := g.opts.TSDB.Querier(g.opts.Context, mintMS, maxtMS)
+	if err != nil {
+		level.Error(g.logger).Log("msg", "Failed to get Querier", "err", err)
+		return
+	}
+
+	for _, rule := range g.Rules() {
+		alertRule, ok := rule.(*AlertingRule)
+		if !ok {
+			continue
+		}
+
+		alertHoldDuration := alertRule.HoldDuration()
+		if alertHoldDuration < g.opts.ForGracePeriod {
+			// If alertHoldDuration is already less than grace period, we would not
+			// like to make it wait for `g.opts.ForGracePeriod` time before firing.
+			// Hence we skip restoration, which will make it wait for alertHoldDuration.
+			alertRule.SetRestored(true)
+			continue
+		}
+
+		alertRule.ForEachActiveAlert(func(a *Alert) {
+			smpl := alertRule.forStateSample(a, time.Now(), 0)
+			var matchers []*labels.Matcher
+			for _, l := range smpl.Metric {
+				mt, err := labels.NewMatcher(labels.MatchEqual, l.Name, l.Value)
+				if err != nil {
+					panic(err)
+				}
+				matchers = append(matchers, mt)
+			}
+
+			sset, err := q.Select(nil, matchers...)
+			if err != nil {
+				level.Error(g.logger).Log("msg", "Failed to restore 'for' state",
+					labels.AlertName, alertRule.Name(), "stage", "Select", "err", err)
+				return
+			}
+
+			seriesFound := false
+			var s storage.Series
+			for sset.Next() {
+				// Query assures that smpl.Metric is included in sset.At().Labels(),
+				// hence just checking the length would act like equality.
+				// (This is faster than calling labels.Compare again as we already have some info).
+				if len(sset.At().Labels()) == len(smpl.Metric) {
+					s = sset.At()
+					seriesFound = true
+					break
+				}
+			}
+
+			if !seriesFound {
+				return
+			}
+
+			// Series found for the 'for' state.
+			var t int64
+			var v float64
+			it := s.Iterator()
+			for it.Next() {
+				t, v = it.At()
+			}
+			if it.Err() != nil {
+				level.Error(g.logger).Log("msg", "Failed to restore 'for' state",
+					labels.AlertName, alertRule.Name(), "stage", "Iterator", "err", it.Err())
+				return
+			}
+			if value.IsStaleNaN(v) { // Alert was not active.
+				return
+			}
+
+			downAt := time.Unix(t/1000, 0)
+			restoredActiveAt := time.Unix(int64(v), 0)
+			timeSpentPending := downAt.Sub(restoredActiveAt)
+			timeRemainingPending := alertHoldDuration - timeSpentPending
+
+			if timeRemainingPending <= 0 {
+				// It means that alert was firing when prometheus went down.
+				// In the next Eval, the state of this alert will be set back to
+				// firing again if it's still firing in that Eval.
+				// Nothing to be done in this case.
+			} else if timeRemainingPending < g.opts.ForGracePeriod {
+				// (new) restoredActiveAt = (ts + m.opts.ForGracePeriod) - alertHoldDuration
+				//                            /* new firing time */      /* moving back by hold duration */
+				//
+				// Proof of correctness:
+				// firingTime = restoredActiveAt.Add(alertHoldDuration)
+				//            = ts + m.opts.ForGracePeriod - alertHoldDuration + alertHoldDuration
+				//            = ts + m.opts.ForGracePeriod
+				//
+				// Time remaining to fire = firingTime.Sub(ts)
+				//                        = (ts + m.opts.ForGracePeriod) - ts
+				//                        = m.opts.ForGracePeriod
+				restoredActiveAt = ts.Add(g.opts.ForGracePeriod).Add(-alertHoldDuration)
+			} else {
+				// By shifting ActiveAt to the future (ActiveAt + some_duration),
+				// the total pending time from the original ActiveAt
+				// would be `alertHoldDuration + some_duration`.
+				// Here, some_duration = downDuration.
+				downDuration := ts.Sub(downAt)
+				restoredActiveAt = restoredActiveAt.Add(downDuration)
+			}
+
+			a.ActiveAt = restoredActiveAt
+			level.Debug(g.logger).Log("msg", "'for' state restored",
+				labels.AlertName, alertRule.Name(), "restored_time", a.ActiveAt.Format(time.RFC850),
+				"labels", a.Labels.String())
+
+		})
+
+		alertRule.SetRestored(true)
+	}
 
 }
 
@@ -606,20 +745,23 @@ func (m *Manager) Stop() {
 	level.Info(m.logger).Log("msg", "Rule manager stopped")
 }
 
-// Update the rule manager's state as the config requires. If
-// loading the new rules failed the old rule set is restored.
-func (m *Manager) Update(interval time.Duration, files []string) error {
+func (m *Manager) EditGroup(interval time.Duration, rule string, groupName string) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
-	groups, errs := m.LoadGroups(interval, files...)
+	m.restored = true
+
+	var groups map[string]*Group
+	var errs []error
+
+	groups, errs = m.LoadGroup(interval, rule, groupName)
+
 	if errs != nil {
 		for _, e := range errs {
 			level.Error(m.logger).Log("msg", "loading groups failed", "err", e)
 		}
 		return errors.New("error loading rules, previous rule set restored")
 	}
-	m.restored = true
 
 	var wg sync.WaitGroup
 
@@ -628,7 +770,96 @@ func (m *Manager) Update(interval time.Duration, files []string) error {
 
 		// If there is an old group with the same identifier, stop it and wait for
 		// it to finish the current iteration. Then copy it into the new group.
-		gn := GroupKey(newg.name, newg.file)
+		gn := groupKey(newg.name, newg.file)
+		oldg, ok := m.groups[gn]
+		if !ok {
+			return errors.New("rule not found")
+		}
+
+		delete(m.groups, gn)
+
+		go func(newg *Group) {
+			if ok {
+				oldg.stop()
+				fmt.Println("with oldg key LoadGroup 2:", oldg.rules)
+				newg.CopyState(oldg)
+			}
+			go func() {
+				// Wait with starting evaluation until the rule manager
+				// is told to run. This is necessary to avoid running
+				// queries against a bootstrapping storage.
+				<-m.block
+				newg.run(m.opts.Context)
+			}()
+			wg.Done()
+		}(newg)
+
+		m.groups[gn] = newg
+
+	}
+
+	// // Stop remaining old groups.
+	// for _, oldg := range m.groups {
+	// 	oldg.stop()
+	// }
+
+	wg.Wait()
+
+	return nil
+}
+
+func (m *Manager) DeleteGroup(interval time.Duration, rule string, groupName string) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	m.restored = true
+
+	filename := "webAppEditor"
+
+	gn := groupKey(groupName, filename)
+	oldg, ok := m.groups[gn]
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(newg *Group) {
+		if ok {
+			oldg.stop()
+			delete(m.groups, gn)
+		}
+		defer wg.Done()
+	}(oldg)
+
+	wg.Wait()
+
+	return nil
+}
+
+func (m *Manager) AddGroup(interval time.Duration, rule string, groupName string) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	m.restored = true
+
+	var groups map[string]*Group
+	var errs []error
+
+	groups, errs = m.LoadGroup(interval, rule, groupName)
+
+	if errs != nil {
+		for _, e := range errs {
+			level.Error(m.logger).Log("msg", "loading groups failed", "err", e)
+		}
+		return errors.New("error loading rules, previous rule set restored")
+	}
+
+	var wg sync.WaitGroup
+
+	for _, newg := range groups {
+		wg.Add(1)
+
+		// If there is an old group with the same identifier, stop it and wait for
+		// it to finish the current iteration. Then copy it into the new group.
+		gn := groupKey(newg.name, newg.file)
 		oldg, ok := m.groups[gn]
 		delete(m.groups, gn)
 
@@ -646,15 +877,140 @@ func (m *Manager) Update(interval time.Duration, files []string) error {
 			}()
 			wg.Done()
 		}(newg)
-	}
 
-	// Stop remaining old groups.
-	for _, oldg := range m.groups {
-		oldg.stop()
+		if !ok {
+			m.groups[gn] = newg
+		}
 	}
 
 	wg.Wait()
-	m.groups = groups
 
 	return nil
+}
+
+// LoadGroup loads a given rule in rule manager
+func (m *Manager) LoadGroup(interval time.Duration, rule string, groupName string) (map[string]*Group, []error) {
+
+	shouldRestore := !m.restored
+	filename := "webAppEditor"
+	fmt.Println("loading rule:", rule)
+	r, errs := ParsePostableRule([]byte(rule))
+	fmt.Println("after load rule:", r, errs)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+
+	if interval == 0 {
+		return nil, []error{fmt.Errorf("group interval can not be zero")}
+	}
+
+	expr, err := promql.ParseExpr(r.Expr)
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	rules := make([]Rule, 0)
+	if r.Alert != "" {
+		rules = append(rules, NewAlertingRule(
+			r.Alert,
+			expr,
+			time.Duration(r.For),
+			labels.FromMap(r.Labels),
+			labels.FromMap(r.Annotations),
+			m.restored,
+			log.With(m.logger, "alert", r.Alert),
+		))
+	}
+	//todo(amol): recording is not supported from UI yet?
+	// rules = append(rules, NewRecordingRule(
+	//	r.Record,
+	//	expr,
+	//	labels.FromMap(r.Labels),
+	//))
+
+	groups := make(map[string]*Group)
+	groups[groupKey(groupName, filename)] = NewGroup(groupName, filename, interval, rules, shouldRestore, m.opts)
+	fmt.Println("groups:", groups)
+	return groups, nil
+}
+
+// RuleGroups returns the list of manager's rule groups.
+func (m *Manager) RuleGroups() []*Group {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	rgs := make([]*Group, 0, len(m.groups))
+	for _, g := range m.groups {
+		rgs = append(rgs, g)
+	}
+
+	sort.Slice(rgs, func(i, j int) bool {
+		return rgs[i].file < rgs[j].file && rgs[i].name < rgs[j].name
+	})
+
+	return rgs
+}
+
+// RuleGroups returns the list of manager's rule groups.
+func (m *Manager) RuleGroupsWithoutLock() []*Group {
+
+	rgs := make([]*Group, 0, len(m.groups))
+	for _, g := range m.groups {
+		rgs = append(rgs, g)
+	}
+
+	sort.Slice(rgs, func(i, j int) bool {
+		return rgs[i].file < rgs[j].file && rgs[i].name < rgs[j].name
+	})
+
+	return rgs
+}
+
+// Rules returns the list of the manager's rules.
+func (m *Manager) Rules() []Rule {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	var rules []Rule
+	for _, g := range m.groups {
+		rules = append(rules, g.rules...)
+	}
+
+	return rules
+}
+
+// AlertingRules returns the list of the manager's alerting rules.
+func (m *Manager) AlertingRules() []*AlertingRule {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	alerts := []*AlertingRule{}
+	for _, rule := range m.Rules() {
+		if alertingRule, ok := rule.(*AlertingRule); ok {
+			alerts = append(alerts, alertingRule)
+		}
+	}
+	return alerts
+}
+
+// Describe implements prometheus.Collector.
+func (m *Manager) Describe(ch chan<- *prometheus.Desc) {
+	ch <- lastDuration
+	ch <- groupInterval
+}
+
+// Collect implements prometheus.Collector.
+func (m *Manager) Collect(ch chan<- prometheus.Metric) {
+	for _, g := range m.RuleGroups() {
+		ch <- prometheus.MustNewConstMetric(lastDuration,
+			prometheus.GaugeValue,
+			g.GetEvaluationDuration().Seconds(),
+			groupKey(g.file, g.name))
+	}
+	for _, g := range m.RuleGroups() {
+		ch <- prometheus.MustNewConstMetric(groupInterval,
+			prometheus.GaugeValue,
+			g.interval.Seconds(),
+			groupKey(g.file, g.name))
+	}
 }

@@ -35,18 +35,19 @@ import (
 	"github.com/prometheus/common/promlog"
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery"
-	"github.com/prometheus/prometheus/notifier"
 	"github.com/prometheus/prometheus/promql"
-	"github.com/prometheus/prometheus/rules"
+
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/tsdb"
 	"github.com/prometheus/prometheus/util/stats"
 	"github.com/prometheus/prometheus/util/strutil"
 
+	"github.com/prometheus/prometheus/pkg/labels"
 	"go.signoz.io/query-service/constants"
 	am "go.signoz.io/query-service/integrations/alertManager"
 	"go.signoz.io/query-service/model"
+	"go.signoz.io/query-service/rules"
 	"go.uber.org/zap"
 )
 
@@ -77,6 +78,7 @@ type ClickHouseReader struct {
 	ruleManager     *rules.Manager
 	promConfig      *config.Config
 	alertManager    am.Manager
+	startedAt       time.Time
 }
 
 // NewTraceReader returns a TraceReader for the database
@@ -100,6 +102,7 @@ func NewReader(localDB *sqlx.DB) *ClickHouseReader {
 		operationsTable: options.primary.OperationsTable,
 		indexTable:      options.primary.IndexTable,
 		errorTable:      options.primary.ErrorTable,
+		startedAt:       time.Now(),
 	}
 }
 
@@ -136,7 +139,7 @@ func (r *ClickHouseReader) Start() {
 		configFile string
 
 		localStoragePath    string
-		notifier            notifier.Options
+		notifier            am.NotifierOptions
 		notifierTimeout     promModel.Duration
 		forGracePeriod      promModel.Duration
 		outageTolerance     promModel.Duration
@@ -153,7 +156,7 @@ func (r *ClickHouseReader) Start() {
 
 		logLevel promlog.AllowedLevel
 	}{
-		notifier: notifier.Options{
+		notifier: am.NotifierOptions{
 			Registerer: prometheus.DefaultRegisterer,
 		},
 	}
@@ -167,7 +170,7 @@ func (r *ClickHouseReader) Start() {
 
 	cfg.notifier.QueueCapacity = 10000
 	cfg.notifierTimeout = promModel.Duration(time.Duration.Seconds(10))
-	notifier := notifier.NewManager(&cfg.notifier, log.With(logger, "component", "notifier"))
+	notifier := am.NewNotifier(&cfg.notifier, log.With(logger, "component", "notifier"))
 	// notifier.ApplyConfig(conf)
 
 	ExternalURL, err := computeExternalURL("", "0.0.0.0:3301")
@@ -201,7 +204,7 @@ func (r *ClickHouseReader) Start() {
 	ruleManager := rules.NewManager(&rules.ManagerOptions{
 		Appendable:      fanoutStorage,
 		TSDB:            localStorage,
-		QueryFunc:       rules.EngineQueryFunc(queryEngine, fanoutStorage),
+		QueryFunc:       RuleQueryFunc(r),
 		NotifyFunc:      sendAlerts(notifier, ExternalURL.String()),
 		Context:         context.Background(),
 		ExternalURL:     ExternalURL,
@@ -484,12 +487,12 @@ func computeExternalURL(u, listenAddr string) (*url.URL, error) {
 }
 
 // sendAlerts implements the rules.NotifyFunc for a Notifier.
-func sendAlerts(n *notifier.Manager, externalURL string) rules.NotifyFunc {
+func sendAlerts(n *am.Notifier, externalURL string) rules.NotifyFunc {
 	return func(ctx context.Context, expr string, alerts ...*rules.Alert) {
-		var res []*notifier.Alert
+		var res []*am.Alert
 
 		for _, alert := range alerts {
-			a := &notifier.Alert{
+			a := &am.Alert{
 				StartsAt:     alert.FiredAt,
 				Labels:       alert.Labels,
 				Annotations:  alert.Annotations,
@@ -525,6 +528,28 @@ func connect(cfg *namespaceConfig) (*sqlx.DB, error) {
 	}
 
 	return cfg.Connector(cfg)
+}
+
+func RuleQueryFunc(reader *ClickHouseReader) rules.QueryFunc {
+	return func(ctx context.Context, qs string, t time.Time) (rules.Vector, error) {
+		// just run the ch query and return results in vector format
+		if time.Now().After(reader.startedAt.Add(1 * time.Minute)) {
+			fmt.Println("Resolving the alert")
+			return nil, nil
+		}
+		fmt.Println("firing the alert")
+		return rules.Vector{
+			rules.Sample{
+				Point: rules.Point{T: t.Unix(), V: 1},
+				Metric: labels.Labels{
+					labels.Label{
+						Name:  "service_name",
+						Value: "goApp",
+					},
+				},
+			},
+		}, nil
+	}
 }
 
 type byAlertStateAndNameSorter struct {
