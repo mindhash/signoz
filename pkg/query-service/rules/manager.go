@@ -135,7 +135,7 @@ func groupKey(name, file string) string {
 
 // NewGroup makes a new Group with the given name, options, and rules.
 func NewGroup(name, file string, interval time.Duration, rules []Rule, shouldRestore bool, opts *ManagerOptions) *Group {
-	fmt.Println("rules: ", rules)
+
 	return &Group{
 		name:                 name,
 		file:                 file,
@@ -376,7 +376,7 @@ func (g *Group) CopyState(from *Group) {
 	g.lastEvaluation = from.lastEvaluation
 
 	ruleMap := make(map[string][]int, len(from.rules))
-	fmt.Println("group copy:", from.rules[0])
+
 	for fi, fromRule := range from.rules {
 		nameAndLabels := nameAndLabels(fromRule)
 		l := ruleMap[nameAndLabels]
@@ -435,7 +435,7 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 
 		func(i int, rule Rule) {
 			sp, ctx := opentracing.StartSpanFromContext(ctx, "rule")
-			fmt.Println("R:", rule)
+
 			sp.SetTag("name", rule.Name())
 			defer func(t time.Time) {
 				sp.Finish()
@@ -781,7 +781,6 @@ func (m *Manager) EditGroup(interval time.Duration, rule string, groupName strin
 		go func(newg *Group) {
 			if ok {
 				oldg.stop()
-				fmt.Println("with oldg key LoadGroup 2:", oldg.rules)
 				newg.CopyState(oldg)
 			}
 			go func() {
@@ -893,9 +892,8 @@ func (m *Manager) LoadGroup(interval time.Duration, rule string, groupName strin
 
 	shouldRestore := !m.restored
 	filename := "webAppEditor"
-	fmt.Println("loading rule:", rule)
 	r, errs := ParsePostableRule([]byte(rule))
-	fmt.Println("after load rule:", r, errs)
+
 	if len(errs) > 0 {
 		return nil, errs
 	}
@@ -904,16 +902,19 @@ func (m *Manager) LoadGroup(interval time.Duration, rule string, groupName strin
 		return nil, []error{fmt.Errorf("group interval can not be zero")}
 	}
 
-	expr, err := promql.ParseExpr(r.Expr)
-	if err != nil {
-		return nil, []error{err}
-	}
+	// todo(amol): commented this to ignore promql completely
+	// need to remove this after confirmation
+	// expr, err := promql.ParseExpr(r.Expr)
+	//if err != nil {
+	//	return nil, []error{err}
+	//}
 
 	rules := make([]Rule, 0)
 	if r.Alert != "" {
 		rules = append(rules, NewAlertingRule(
 			r.Alert,
-			expr,
+			//expr,
+			r.Query,
 			time.Duration(r.For),
 			labels.FromMap(r.Labels),
 			labels.FromMap(r.Annotations),
@@ -930,7 +931,7 @@ func (m *Manager) LoadGroup(interval time.Duration, rule string, groupName strin
 
 	groups := make(map[string]*Group)
 	groups[groupKey(groupName, filename)] = NewGroup(groupName, filename, interval, rules, shouldRestore, m.opts)
-	fmt.Println("groups:", groups)
+
 	return groups, nil
 }
 

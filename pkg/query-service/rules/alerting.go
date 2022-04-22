@@ -13,8 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/prometheus/prometheus/promql"
-	"go.signoz.io/query-service/utils/rulefmt"
+	qsmodel "go.signoz.io/query-service/model"
 	"go.signoz.io/query-service/utils/timestamp"
 	yaml "gopkg.in/yaml.v2"
 )
@@ -82,9 +81,11 @@ type Expr interface {
 }
 
 type AlertingRule struct {
-	name string
+	name  string
+	query qsmodel.CompositeMetricQuery
+
 	// The vector expression from which to generate alerts.
-	vector promql.Expr
+	// vector promql.Expr
 
 	holdDuration time.Duration
 	labels       labels.Labels
@@ -113,12 +114,19 @@ type AlertingRule struct {
 }
 
 func NewAlertingRule(
-	name string, vec promql.Expr, hold time.Duration, labels, annotations labels.Labels, restored bool, logger log.Logger,
+	name string,
+	//expr promql.Expr,
+	query qsmodel.CompositeMetricQuery,
+	hold time.Duration,
+	labels, annotations labels.Labels,
+	restored bool,
+	logger log.Logger,
 ) *AlertingRule {
 
 	return &AlertingRule{
-		name:         name,
-		vector:       vec,
+		name:  name,
+		query: query,
+		// vector:       expr,
 		holdDuration: hold,
 		labels:       labels,
 		annotations:  annotations,
@@ -292,6 +300,7 @@ func (r *AlertingRule) ForEachActiveAlert(f func(*Alert)) {
 	}
 }
 
+// todo(amol): need to review this
 func (a *Alert) needsSending(ts time.Time, resendDelay time.Duration) bool {
 	if a.State == StatePending {
 		return false
@@ -320,11 +329,12 @@ func (r *AlertingRule) sendAlerts(ctx context.Context, ts time.Time, resendDelay
 			alerts = append(alerts, &anew)
 		}
 	})
-	notifyFunc(ctx, r.vector.String(), alerts...)
+	notifyFunc(ctx, "", alerts...)
 }
 
 func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, externalURL *url.URL) (Vector, error) {
-	res, err := query(ctx, r.vector.String(), ts)
+
+	res, err := query(ctx, r.query.BuildQuery(), ts)
 	if err != nil {
 		r.SetHealth(HealthBad)
 		r.SetLastError(err)
@@ -449,10 +459,12 @@ func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, 
 }
 
 func (r *AlertingRule) String() string {
-	ar := rulefmt.Rule{
-		Alert:       r.name,
-		Expr:        r.vector.String(),
-		For:         model.Duration(r.holdDuration),
+	ar := PostableRule{
+		Alert: r.name,
+		// todo(amol): need to use json marshaling here
+		// QueryBuilder: r.Query.String(),
+		Expr:        "", // r.vector.String(),
+		For:         time.Duration(r.holdDuration),
 		Labels:      r.labels.Map(),
 		Annotations: r.annotations.Map(),
 	}

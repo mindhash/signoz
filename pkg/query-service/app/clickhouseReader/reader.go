@@ -41,7 +41,6 @@ import (
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/storage/tsdb"
 	"github.com/prometheus/prometheus/util/stats"
-	"github.com/prometheus/prometheus/util/strutil"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"go.signoz.io/query-service/constants"
@@ -493,10 +492,12 @@ func sendAlerts(n *am.Notifier, externalURL string) rules.NotifyFunc {
 
 		for _, alert := range alerts {
 			a := &am.Alert{
-				StartsAt:     alert.FiredAt,
-				Labels:       alert.Labels,
-				Annotations:  alert.Annotations,
-				GeneratorURL: externalURL + strutil.TableLinkForExpression(expr),
+				StartsAt:    alert.FiredAt,
+				Labels:      alert.Labels,
+				Annotations: alert.Annotations,
+				// (22/04) amol: changed generator url to /alerts
+				GeneratorURL: externalURL + "/alerts",
+				// GeneratorURL: externalURL + strutil.TableLinkForExpression(expr),
 			}
 			if !alert.ResolvedAt.IsZero() {
 				a.EndsAt = alert.ResolvedAt
@@ -532,6 +533,7 @@ func connect(cfg *namespaceConfig) (*sqlx.DB, error) {
 
 func RuleQueryFunc(reader *ClickHouseReader) rules.QueryFunc {
 	return func(ctx context.Context, qs string, t time.Time) (rules.Vector, error) {
+		fmt.Println("query:", qs)
 		// just run the ch query and return results in vector format
 		if time.Now().After(reader.startedAt.Add(1 * time.Minute)) {
 			fmt.Println("Resolving the alert")

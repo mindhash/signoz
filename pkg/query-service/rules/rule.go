@@ -7,22 +7,24 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
+	qsmodel "go.signoz.io/query-service/model"
 	"go.signoz.io/query-service/utils/timestamp"
 	yaml "gopkg.in/yaml.v2"
 )
 
 // PostableRule is used to create alerting rule from HTTP api
 type PostableRule struct {
-	Alert       string            `yaml:"alert,omitempty"`
-	Expr        string            `yaml:"expr"`
-	For         time.Duration     `yaml:"for,omitempty"`
-	Labels      map[string]string `yaml:"labels,omitempty"`
-	Annotations map[string]string `yaml:"annotations,omitempty"`
+	Alert       string                       `yaml:"alert,omitempty"`
+	Query       qsmodel.CompositeMetricQuery `yaml:"query,omitempty"`
+	Expr        string                       `yaml:"expr,omitempty"`
+	For         time.Duration                `yaml:"for,omitempty"`
+	Labels      map[string]string            `yaml:"labels,omitempty"`
+	Annotations map[string]string            `yaml:"annotations,omitempty"`
 }
 
 func ParsePostableRule(content []byte) (*PostableRule, []error) {
 	rule := PostableRule{}
-	if err := yaml.UnmarshalStrict(content, &rule); err != nil {
+	if err := yaml.Unmarshal(content, &rule); err != nil {
 		return nil, []error{err}
 	}
 	if errs := rule.Validate(); len(errs) > 0 {
