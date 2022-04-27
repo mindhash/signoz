@@ -1,16 +1,12 @@
 package clickhouseReader
 
 import (
-	"bytes"
 	"context"
-	"crypto/md5"
 	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -42,11 +38,11 @@ import (
 	"github.com/prometheus/prometheus/storage/tsdb"
 	"github.com/prometheus/prometheus/util/stats"
 
-	"github.com/prometheus/prometheus/pkg/labels"
 	"go.signoz.io/query-service/constants"
 	am "go.signoz.io/query-service/integrations/alertManager"
 	"go.signoz.io/query-service/model"
 	"go.signoz.io/query-service/rules"
+	"go.signoz.io/query-service/utils/labels"
 	"go.uber.org/zap"
 )
 
@@ -92,7 +88,11 @@ func NewReader(localDB *sqlx.DB) *ClickHouseReader {
 		os.Exit(1)
 	}
 
-	alertManager := am.New("")
+	alertManager, err := am.New("")
+	if err != nil {
+		zap.S().Error(err)
+		os.Exit(1)
+	}
 
 	return &ClickHouseReader{
 		db:              db,
@@ -138,10 +138,7 @@ func (r *ClickHouseReader) Start() {
 		configFile string
 
 		localStoragePath    string
-		notifier            am.NotifierOptions
-		notifierTimeout     promModel.Duration
-		forGracePeriod      promModel.Duration
-		outageTolerance     promModel.Duration
+		notifierOpts        am.NotifierOptions
 		resendDelay         promModel.Duration
 		tsdb                tsdb.Options
 		lookbackDelta       promModel.Duration
@@ -155,8 +152,10 @@ func (r *ClickHouseReader) Start() {
 
 		logLevel promlog.AllowedLevel
 	}{
-		notifier: am.NotifierOptions{
-			Registerer: prometheus.DefaultRegisterer,
+		notifierOpts: am.NotifierOptions{
+			QueueCapacity:    10000,
+			Timeout:          time.Duration(time.Duration.Seconds(10)),
+			AlertManagerURLs: []string{constants.GetAlertManagerApiPrefix()},
 		},
 	}
 
@@ -165,12 +164,12 @@ func (r *ClickHouseReader) Start() {
 
 	// fanoutStorage := remoteStorage
 	fanoutStorage := storage.NewFanout(logger, remoteStorage)
-	localStorage := remoteStorage
 
-	cfg.notifier.QueueCapacity = 10000
-	cfg.notifierTimeout = promModel.Duration(time.Duration.Seconds(10))
-	notifier := am.NewNotifier(&cfg.notifier, log.With(logger, "component", "notifier"))
-	// notifier.ApplyConfig(conf)
+	notifier, err := am.NewNotifier(&cfg.notifierOpts, log.With(logger, "component", "notifier"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, errors.Wrapf(err, "alert manager URL parsing failed: %q", cfg.notifierOpts.String()))
+		os.Exit(2)
+	}
 
 	ExternalURL, err := computeExternalURL("", "0.0.0.0:3301")
 	if err != nil {
@@ -178,15 +177,10 @@ func (r *ClickHouseReader) Start() {
 		os.Exit(2)
 	}
 
-	cfg.outageTolerance = promModel.Duration(time.Duration.Hours(1))
-	cfg.forGracePeriod = promModel.Duration(time.Duration.Minutes(10))
 	cfg.resendDelay = promModel.Duration(time.Duration.Minutes(1))
 
 	ctxScrape, cancelScrape := context.WithCancel(context.Background())
 	discoveryManagerScrape := discovery.NewManager(ctxScrape, log.With(logger, "component", "discovery manager scrape"), discovery.Name("scrape"))
-
-	ctxNotify, cancelNotify := context.WithCancel(context.Background())
-	discoveryManagerNotify := discovery.NewManager(ctxNotify, log.With(logger, "component", "discovery manager notify"), discovery.Name("notify"))
 
 	scrapeManager := scrape.NewManager(log.With(logger, "component", "scrape manager"), fanoutStorage)
 
@@ -201,24 +195,19 @@ func (r *ClickHouseReader) Start() {
 	queryEngine := promql.NewEngine(opts)
 
 	ruleManager := rules.NewManager(&rules.ManagerOptions{
-		Appendable:      fanoutStorage,
-		TSDB:            localStorage,
-		QueryFunc:       RuleQueryFunc(r),
-		NotifyFunc:      sendAlerts(notifier, ExternalURL.String()),
-		Context:         context.Background(),
-		ExternalURL:     ExternalURL,
-		Registerer:      prometheus.DefaultRegisterer,
-		Logger:          log.With(logger, "component", "rule manager"),
-		OutageTolerance: time.Duration(cfg.outageTolerance),
-		ForGracePeriod:  time.Duration(cfg.forGracePeriod),
-		ResendDelay:     time.Duration(cfg.resendDelay),
+		QueryFunc:   RuleQueryFunc(r),
+		NotifyFunc:  sendAlerts(notifier, ExternalURL.String()),
+		Context:     context.Background(),
+		ExternalURL: ExternalURL,
+		Registerer:  prometheus.DefaultRegisterer,
+		Logger:      log.With(logger, "component", "rule manager"),
+		ResendDelay: time.Duration(cfg.resendDelay),
 	})
 
 	reloaders := []func(cfg *config.Config) error{
 		remoteStorage.ApplyConfig,
-		// The Scrape and notifier managers need to reload before the Discovery manager as
+		// The Scrape  managers need to reload before the Discovery manager as
 		// they need to read the most updated config when receiving the new targets list.
-		notifier.ApplyConfig,
 		scrapeManager.ApplyConfig,
 		func(cfg *config.Config) error {
 			c := make(map[string]sd_config.ServiceDiscoveryConfig)
@@ -227,32 +216,6 @@ func (r *ClickHouseReader) Start() {
 			}
 			return discoveryManagerScrape.ApplyConfig(c)
 		},
-		func(cfg *config.Config) error {
-			c := make(map[string]sd_config.ServiceDiscoveryConfig)
-			for _, v := range cfg.AlertingConfig.AlertmanagerConfigs {
-				// AlertmanagerConfigs doesn't hold an unique identifier so we use the config hash as the identifier.
-				b, err := json.Marshal(v)
-				if err != nil {
-					return err
-				}
-				c[fmt.Sprintf("%x", md5.Sum(b))] = v.ServiceDiscoveryConfig
-			}
-			return discoveryManagerNotify.ApplyConfig(c)
-		},
-		// func(cfg *config.Config) error {
-		// 	// Get all rule files matching the configuration oaths.
-		// 	var files []string
-		// 	for _, pat := range cfg.RuleFiles {
-		// 		fs, err := filepath.Glob(pat)
-		// 		if err != nil {
-		// 			// The only error can be a bad pattern.
-		// 			return fmt.Errorf("error retrieving rule files for %s: %s", pat, err)
-		// 		}
-		// 		files = append(files, fs...)
-		// 	}
-		// 	return ruleManager.Update(time.Duration(cfg.GlobalConfig.EvaluationInterval), files)
-		// },
-
 	}
 
 	// sync.Once is used to make sure we can close the channel at different execution stages(SIGTERM or when the config is loaded).
@@ -286,20 +249,7 @@ func (r *ClickHouseReader) Start() {
 			},
 		)
 	}
-	{
-		// Notify discovery manager.
-		g.Add(
-			func() error {
-				err := discoveryManagerNotify.Run()
-				level.Info(logger).Log("msg", "Notify discovery manager stopped")
-				return err
-			},
-			func(err error) {
-				level.Info(logger).Log("msg", "Stopping notify discovery manager...")
-				cancelNotify()
-			},
-		)
-	}
+
 	{
 		// Scrape manager.
 		g.Add(
@@ -342,6 +292,7 @@ func (r *ClickHouseReader) Start() {
 
 				reloadReady.Close()
 
+				// load rules into rule manager groups
 				rules, apiErrorObj := r.GetRulesFromDB()
 
 				if apiErrorObj != nil {
@@ -351,18 +302,6 @@ func (r *ClickHouseReader) Start() {
 					apiErrorObj = r.LoadRule(rule)
 					if apiErrorObj != nil {
 						zap.S().Errorf("Not able to load rule with id=%d loaded from DB", rule.Id, rule.Data)
-					}
-				}
-
-				channels, apiErrorObj := r.GetChannels()
-
-				if apiErrorObj != nil {
-					zap.S().Errorf("Not able to read channels from DB")
-				}
-				for _, channel := range *channels {
-					apiErrorObj = r.LoadChannel(&channel)
-					if apiErrorObj != nil {
-						zap.S().Errorf("Not able to load channel with id=%d loaded from DB", channel.Id, channel.Data)
 					}
 				}
 
@@ -405,7 +344,7 @@ func (r *ClickHouseReader) Start() {
 				// so we wait until the config is fully loaded.
 				<-reloadReady.C
 
-				notifier.Run(discoveryManagerNotify.SyncCh())
+				notifier.Run()
 				level.Info(logger).Log("msg", "Notifier manager stopped")
 				return nil
 			},
@@ -676,31 +615,6 @@ func (r *ClickHouseReader) LoadRule(rule model.RuleResponseItem) *model.ApiError
 	err := r.ruleManager.AddGroup(time.Duration(r.promConfig.GlobalConfig.EvaluationInterval), rule.Data, groupName)
 
 	if err != nil {
-		return &model.ApiError{Typ: model.ErrorInternal, Err: err}
-	}
-
-	return nil
-}
-
-func (r *ClickHouseReader) LoadChannel(channel *model.ChannelItem) *model.ApiError {
-
-	receiver := &am.Receiver{}
-	if err := json.Unmarshal([]byte(channel.Data), receiver); err != nil { // Parse []byte to go struct pointer
-		return &model.ApiError{Typ: model.ErrorBadData, Err: err}
-	}
-
-	response, err := http.Post(constants.GetAlertManagerApiPrefix()+"v1/receivers", "application/json", bytes.NewBuffer([]byte(channel.Data)))
-
-	if err != nil {
-		zap.S().Errorf("Error in getting response of API call to alertmanager/v1/receivers\n", err)
-		return &model.ApiError{Typ: model.ErrorInternal, Err: err}
-	}
-	if response.StatusCode > 299 {
-		responseData, _ := ioutil.ReadAll(response.Body)
-
-		err := fmt.Errorf("Error in getting 2xx response in API call to alertmanager/v1/receivers\n", response.Status, string(responseData))
-		zap.S().Error(err)
-
 		return &model.ApiError{Typ: model.ErrorInternal, Err: err}
 	}
 

@@ -11,9 +11,9 @@ import (
 	"github.com/go-kit/log/level"
 
 	"github.com/pkg/errors"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/pkg/labels"
 	qsmodel "go.signoz.io/query-service/model"
+	"go.signoz.io/query-service/utils/labels"
+	"go.signoz.io/query-service/utils/times"
 	"go.signoz.io/query-service/utils/timestamp"
 	yaml "gopkg.in/yaml.v2"
 )
@@ -95,10 +95,6 @@ type AlertingRule struct {
 	// externalLabels map[string]string
 	// externalURL    string
 
-	// true if old state has been restored. We start persisting samples for ALERT_FOR_STATE
-	// only after the restoration.
-	restored bool
-
 	mtx                 sync.Mutex
 	evaluationDuration  time.Duration
 	evaluationTimestamp time.Time
@@ -119,7 +115,6 @@ func NewAlertingRule(
 	query qsmodel.CompositeMetricQuery,
 	hold time.Duration,
 	labels, annotations labels.Labels,
-	restored bool,
 	logger log.Logger,
 ) *AlertingRule {
 
@@ -133,7 +128,6 @@ func NewAlertingRule(
 		health:       HealthUnknown,
 		active:       map[uint64]*Alert{},
 		logger:       logger,
-		restored:     restored,
 	}
 }
 
@@ -163,10 +157,6 @@ func (r *AlertingRule) Health() RuleHealth {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	return r.health
-}
-
-func (r *AlertingRule) SetRestored(restored bool) {
-	r.restored = restored
 }
 
 // SetEvaluationDuration updates evaluationDuration to the duration it took to evaluate the rule on its last evaluation.
@@ -366,7 +356,7 @@ func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, 
 				defs+text,
 				"__alert_"+r.Name(),
 				tmplData,
-				model.Time(timestamp.FromTime(ts)),
+				times.Time(timestamp.FromTime(ts)),
 				QueryFunc(query),
 				externalURL,
 			)
@@ -444,11 +434,6 @@ func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, 
 		if a.State == StatePending && ts.Sub(a.ActiveAt) >= r.holdDuration {
 			a.State = StateFiring
 			a.FiredAt = ts
-		}
-
-		if r.restored {
-			vec = append(vec, r.sample(a, ts))
-			vec = append(vec, r.forStateSample(a, ts, float64(a.ActiveAt.Unix())))
 		}
 
 	}

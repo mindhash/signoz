@@ -15,8 +15,7 @@ import (
 	html_template "html/template"
 	text_template "text/template"
 
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/util/strutil"
+	"go.signoz.io/query-service/utils/times"
 )
 
 type tmplQueryRecord struct {
@@ -60,7 +59,7 @@ func NewTemplateExpander(
 	text string,
 	name string,
 	data interface{},
-	timestamp model.Time,
+	timestamp times.Time,
 	queryFunc QueryFunc,
 	externalURL *url.URL,
 ) *TemplateExpander {
@@ -70,7 +69,7 @@ func NewTemplateExpander(
 		data: data,
 		funcMap: text_template.FuncMap{
 			"query": func(q string) (tmplQueryResults, error) {
-				return query(ctx, q, timestamp.Time(), queryFunc)
+				return query(ctx, q, time.Now(), queryFunc)
 			},
 			"first": func(v tmplQueryResults) (*tmplQueryRecord, error) {
 				if len(v) > 0 {
@@ -101,12 +100,10 @@ func NewTemplateExpander(
 			"safeHtml": func(text string) html_template.HTML {
 				return html_template.HTML(text)
 			},
-			"match":     regexp.MatchString,
-			"title":     strings.Title,
-			"toUpper":   strings.ToUpper,
-			"toLower":   strings.ToLower,
-			"graphLink": strutil.GraphLinkForExpression,
-			"tableLink": strutil.TableLinkForExpression,
+			"match":   regexp.MatchString,
+			"title":   strings.Title,
+			"toUpper": strings.ToUpper,
+			"toLower": strings.ToLower,
 			"sortByLabel": func(label string, v tmplQueryResults) tmplQueryResults {
 				sorter := tmplQueryResultsByLabelSorter{v[:], label}
 				sort.Stable(sorter)
@@ -195,7 +192,7 @@ func NewTemplateExpander(
 				if math.IsNaN(v) || math.IsInf(v, 0) {
 					return fmt.Sprintf("%.4g", v)
 				}
-				t := model.TimeFromUnixNano(int64(v * 1e9)).Time().UTC()
+				t := times.TimeFromUnixNano(int64(v * 1e9)).Time().UTC()
 				return fmt.Sprint(t)
 			},
 			"pathPrefix": func() string {

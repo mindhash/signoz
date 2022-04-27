@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/util/stats"
+	"go.signoz.io/query-service/utils/labels"
 )
 
 type ApiError struct {

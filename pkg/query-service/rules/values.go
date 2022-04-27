@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"go.signoz.io/query-service/utils/labels"
 )
 
 // common result format of query

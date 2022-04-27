@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pkg/errors"
-	"github.com/prometheus/common/model"
+
 	qsmodel "go.signoz.io/query-service/model"
+	"go.signoz.io/query-service/utils/times"
 	"go.signoz.io/query-service/utils/timestamp"
 	yaml "gopkg.in/yaml.v2"
 )
@@ -33,19 +35,35 @@ func ParsePostableRule(content []byte) (*PostableRule, []error) {
 	return &rule, []error{}
 }
 
+func isValidLabelName(ln string) bool {
+	if len(ln) == 0 {
+		return false
+	}
+	for i, b := range ln {
+		if !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_' || (b >= '0' && b <= '9' && i > 0)) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidLabelValue(v string) bool {
+	return utf8.ValidString(v)
+}
+
 func (r *PostableRule) Validate() (errs []error) {
 	for k, v := range r.Labels {
-		if !model.LabelName(k).IsValid() {
+		if !isValidLabelName(k) {
 			errs = append(errs, errors.Errorf("invalid label name: %s", k))
 		}
 
-		if !model.LabelValue(v).IsValid() {
+		if !isValidLabelValue(v) {
 			errs = append(errs, errors.Errorf("invalid label value: %s", v))
 		}
 	}
 
 	for k := range r.Annotations {
-		if !model.LabelName(k).IsValid() {
+		if !isValidLabelName(k) {
 			errs = append(errs, errors.Errorf("invalid annotation name: %s", k))
 		}
 	}
@@ -69,7 +87,7 @@ func testTemplateParsing(rl *PostableRule) (errs []error) {
 			defs+text,
 			"__alert_"+rl.Alert,
 			tmplData,
-			model.Time(timestamp.FromTime(time.Now())),
+			times.Time(timestamp.FromTime(time.Now())),
 			nil,
 			nil,
 		)
