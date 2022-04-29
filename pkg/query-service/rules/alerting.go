@@ -82,7 +82,7 @@ type Expr interface {
 
 type AlertingRule struct {
 	name  string
-	query qsmodel.CompositeMetricQuery
+	query qsmodel.QueryRangeParamsV2
 
 	// The vector expression from which to generate alerts.
 	// vector promql.Expr
@@ -112,7 +112,7 @@ type AlertingRule struct {
 func NewAlertingRule(
 	name string,
 	//expr promql.Expr,
-	query qsmodel.CompositeMetricQuery,
+	query qsmodel.QueryRangeParamsV2,
 	hold time.Duration,
 	labels, annotations labels.Labels,
 	logger log.Logger,
@@ -322,9 +322,27 @@ func (r *AlertingRule) sendAlerts(ctx context.Context, ts time.Time, resendDelay
 	notifyFunc(ctx, "", alerts...)
 }
 
-func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, externalURL *url.URL) (Vector, error) {
+func (r *AlertingRule) prepareQueryRange(ts time.Time) *qsmodel.QueryRangeParamsV2 {
+	queryRange := r.query
 
-	res, err := query(ctx, r.query.BuildQuery(), ts)
+	queryRange.End = ts.Unix()
+
+	// todo(amol): need to convert the step to integer
+	// queryRange.Step =
+	queryRange.Start = ts.Add(-time.Duration(1 * time.Minute)).Unix()
+	queryRange.Step = "1 Minute"
+	return &queryRange
+}
+
+func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, externalURL *url.URL) (Vector, error) {
+	// todo(amol): get the name of table in build query
+	buildQueries, err := r.prepareQueryRange(ts).BuildQuery("time_series")
+	if len(buildQueries) == 0 {
+		// todo(amol): add log
+		return nil, fmt.Errorf(fmt.Sprintf("failed to build query for rule %s", r.name))
+	}
+
+	res, err := query(ctx, buildQueries[len(buildQueries)-1], ts)
 	if err != nil {
 		r.SetHealth(HealthBad)
 		r.SetLastError(err)

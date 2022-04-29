@@ -26,12 +26,120 @@ type QueryRangeParams struct {
 	Stats string
 }
 
+type MetricQuery struct {
+	MetricName        string     `json:"metricName"`
+	TagFilters        *FilterSet `json:"tagFilters,omitempty"`
+	GroupingTags      []string   `json:"groupBy,omitempty"`
+	AggregateOperator string     `json:"aggregateOperator,omitempty"`
+}
+
+type CompositeMetricQuery struct {
+	BuildMetricQueries []*MetricQuery `json:"buildMetricQueries"`
+	Formulas           []string       `json:"formulas,omitempty"`
+	RawQuery           string         `json:"rawQuery,omitempty"`
+}
+
+type QueryRangeParamsV2 struct {
+	Start                int64                 `json:"start,omitempty"`
+	End                  int64                 `json:"end,omitempty"`
+	Step                 string                `json:"step,omitempty"`
+	Query                string                `json:"query,omitempty"` // legacy
+	Stats                string                `json:"stats,omitempty"` // legacy
+	CompositeMetricQuery *CompositeMetricQuery `json:"compositeMetricQuery,omitempty"`
+}
+
+func (qp *QueryRangeParamsV2) BuildQuery(tableName string) ([]string, error) {
+
+	if qp.CompositeMetricQuery.RawQuery != "" {
+		return []string{qp.CompositeMetricQuery.RawQuery}, nil
+	}
+
+	var queries []string
+	for _, mq := range qp.CompositeMetricQuery.BuildMetricQueries {
+
+		nameFilterItem := FilterItem{Key: "__name__", Value: mq.MetricName, Operation: "EQ"}
+		if mq.TagFilters == nil {
+			mq.TagFilters = &FilterSet{Operation: "AND", Items: []FilterItem{
+				nameFilterItem,
+			}}
+		} else {
+			mq.TagFilters.Items = append(mq.TagFilters.Items, nameFilterItem)
+		}
+
+		tagsFilter, err := mq.TagFilters.BuildMetricsFilterQuery(tableName)
+		if err != nil {
+			return nil, err
+		}
+		timeSeriesTableTimeFilter := fmt.Sprintf("date >= fromUnixTimestamp64Milli(toInt64(%d)) AND date <= fromUnixTimestamp64Milli(toInt64(%d))", qp.Start, qp.End)
+
+		timeSeriesTableFilterQuery := fmt.Sprintf("%s AND %s", tagsFilter, timeSeriesTableTimeFilter)
+
+		filterSubQuery := fmt.Sprintf("SELECT fingerprint, labels FROM signoz_metrics.time_series WHERE %s", timeSeriesTableFilterQuery)
+
+		samplesTableTimeFilter := fmt.Sprintf("timestamp_ms >= %d AND timestamp_ms < %d", qp.Start, qp.End)
+		intermediateResult := `
+		SELECT fingerprint, %s ts, runningDifference(value)/runningDifference(ts) as res FROM(
+			SELECT fingerprint, %s toStartOfInterval(toDateTime(intDiv(timestamp_ms, 1000)), INTERVAL %s) as ts, max(value) as value
+			FROM signoz_metrics.samples
+			INNER JOIN
+			(
+				%s
+			) as filtered_time_series
+			USING fingerprint
+			WHERE %s
+			GROUP BY %s
+			ORDER BY fingerprint, ts
+		)`
+		groupByFilter := "fingerprint, ts"
+		for _, tag := range mq.GroupingTags {
+			groupByFilter += fmt.Sprintf(", JSONExtractString(labels,'%s') as %s", tag, tag)
+		}
+		groupTags := strings.Join(mq.GroupingTags, ",")
+		if len(mq.GroupingTags) != 0 {
+			groupTags += ","
+		}
+		switch mq.AggregateOperator {
+		case "rate", "sum_rate":
+			query := fmt.Sprintf(intermediateResult, groupTags, groupTags, qp.Step, filterSubQuery, samplesTableTimeFilter, groupByFilter)
+			if mq.AggregateOperator == "sum_rate" {
+				new_query := `
+				SELECT ts, %s sum(res) as res
+				FROM (%s)
+				GROUP BY (ts, %s)
+				ORDER BY ts
+				`
+				query = fmt.Sprintf(new_query, groupTags, query, groupTags)
+			}
+			queries = append(queries, query)
+		default:
+			return nil, fmt.Errorf("unsupported aggregator operator")
+		}
+	}
+	return queries, nil
+}
+
+func (params QueryRangeParamsV2) sanitizeAndValidate() (*QueryRangeParamsV2, error) {
+
+	return nil, nil
+}
+
+// Metric auto complete types
+type metricTags map[string]string
+
+type MetricAutocompleteTagParams struct {
+	MetricName string
+	MetricTags metricTags
+	Match      string
+	TagKey     string
+}
+
 type GetTopEndpointsParams struct {
-	StartTime   string
-	EndTime     string
-	ServiceName string
+	StartTime   string `json:"start"`
+	EndTime     string `json:"end"`
+	ServiceName string `json:"service"`
 	Start       *time.Time
 	End         *time.Time
+	Tags        []TagQuery `json:"tags"`
 }
 
 type GetUsageParams struct {
@@ -45,125 +153,78 @@ type GetUsageParams struct {
 }
 
 type GetServicesParams struct {
-	StartTime string
-	EndTime   string
+	StartTime string `json:"start"`
+	EndTime   string `json:"end"`
 	Period    int
 	Start     *time.Time
 	End       *time.Time
+	Tags      []TagQuery `json:"tags"`
 }
 
 type GetServiceOverviewParams struct {
-	StartTime   string
-	EndTime     string
+	StartTime   string `json:"start"`
+	EndTime     string `json:"end"`
+	Period      string
 	Start       *time.Time
 	End         *time.Time
-	ServiceName string
-	Period      string
-	StepSeconds int
-}
-
-type ApplicationPercentileParams struct {
-	ServiceName string
-	GranOrigin  string
-	GranPeriod  string
-	Intervals   string
-}
-
-func (query *ApplicationPercentileParams) SetGranPeriod(step int) {
-	minutes := step / 60
-	query.GranPeriod = fmt.Sprintf("PT%dM", minutes)
+	Tags        []TagQuery `json:"tags"`
+	ServiceName string     `json:"service"`
+	StepSeconds int        `json:"step"`
 }
 
 type TagQuery struct {
 	Key      string
-	Value    string
-	Operator string
-}
-
-type TagQueryV2 struct {
-	Key      string
 	Values   []string
 	Operator string
 }
-type SpanSearchAggregatesParams struct {
-	ServiceName       string
-	OperationName     string
-	Kind              string
-	MinDuration       string
-	MaxDuration       string
-	Tags              []TagQuery
-	Start             *time.Time
-	End               *time.Time
-	GranOrigin        string
-	GranPeriod        string
-	Intervals         string
-	StepSeconds       int
-	Dimension         string
-	AggregationOption string
-}
-
-type SpanSearchParams struct {
-	ServiceName   string
-	OperationName string
-	Kind          string
-	Intervals     string
-	Start         *time.Time
-	End           *time.Time
-	MinDuration   string
-	MaxDuration   string
-	Limit         int64
-	Order         string
-	Offset        int64
-	BatchSize     int64
-	Tags          []TagQuery
-}
 
 type GetFilteredSpansParams struct {
-	ServiceName []string     `json:"serviceName"`
-	Operation   []string     `json:"operation"`
-	Kind        string       `json:"kind"`
-	Status      []string     `json:"status"`
-	HttpRoute   []string     `json:"httpRoute"`
-	HttpCode    []string     `json:"httpCode"`
-	HttpUrl     []string     `json:"httpUrl"`
-	HttpHost    []string     `json:"httpHost"`
-	HttpMethod  []string     `json:"httpMethod"`
-	Component   []string     `json:"component"`
-	StartStr    string       `json:"start"`
-	EndStr      string       `json:"end"`
-	MinDuration string       `json:"minDuration"`
-	MaxDuration string       `json:"maxDuration"`
-	Limit       int64        `json:"limit"`
-	Order       string       `json:"order"`
-	Offset      int64        `json:"offset"`
-	Tags        []TagQueryV2 `json:"tags"`
-	Exclude     []string     `json:"exclude"`
+	ServiceName []string   `json:"serviceName"`
+	Operation   []string   `json:"operation"`
+	Kind        string     `json:"kind"`
+	Status      []string   `json:"status"`
+	HttpRoute   []string   `json:"httpRoute"`
+	HttpCode    []string   `json:"httpCode"`
+	HttpUrl     []string   `json:"httpUrl"`
+	HttpHost    []string   `json:"httpHost"`
+	HttpMethod  []string   `json:"httpMethod"`
+	Component   []string   `json:"component"`
+	StartStr    string     `json:"start"`
+	EndStr      string     `json:"end"`
+	MinDuration string     `json:"minDuration"`
+	MaxDuration string     `json:"maxDuration"`
+	Limit       int64      `json:"limit"`
+	OrderParam  string     `json:"orderParam"`
+	Order       string     `json:"order"`
+	Offset      int64      `json:"offset"`
+	Tags        []TagQuery `json:"tags"`
+	Exclude     []string   `json:"exclude"`
 	Start       *time.Time
 	End         *time.Time
 }
 
 type GetFilteredSpanAggregatesParams struct {
-	ServiceName       []string     `json:"serviceName"`
-	Operation         []string     `json:"operation"`
-	Kind              string       `json:"kind"`
-	Status            []string     `json:"status"`
-	HttpRoute         []string     `json:"httpRoute"`
-	HttpCode          []string     `json:"httpCode"`
-	HttpUrl           []string     `json:"httpUrl"`
-	HttpHost          []string     `json:"httpHost"`
-	HttpMethod        []string     `json:"httpMethod"`
-	Component         []string     `json:"component"`
-	MinDuration       string       `json:"minDuration"`
-	MaxDuration       string       `json:"maxDuration"`
-	Tags              []TagQueryV2 `json:"tags"`
-	StartStr          string       `json:"start"`
-	EndStr            string       `json:"end"`
-	StepSeconds       int          `json:"step"`
-	Dimension         string       `json:"dimension"`
-	AggregationOption string       `json:"aggregationOption"`
-	GroupBy           string       `json:"groupBy"`
-	Function          string       `json:"function"`
-	Exclude           []string     `json:"exclude"`
+	ServiceName       []string   `json:"serviceName"`
+	Operation         []string   `json:"operation"`
+	Kind              string     `json:"kind"`
+	Status            []string   `json:"status"`
+	HttpRoute         []string   `json:"httpRoute"`
+	HttpCode          []string   `json:"httpCode"`
+	HttpUrl           []string   `json:"httpUrl"`
+	HttpHost          []string   `json:"httpHost"`
+	HttpMethod        []string   `json:"httpMethod"`
+	Component         []string   `json:"component"`
+	MinDuration       string     `json:"minDuration"`
+	MaxDuration       string     `json:"maxDuration"`
+	Tags              []TagQuery `json:"tags"`
+	StartStr          string     `json:"start"`
+	EndStr            string     `json:"end"`
+	StepSeconds       int        `json:"step"`
+	Dimension         string     `json:"dimension"`
+	AggregationOption string     `json:"aggregationOption"`
+	GroupBy           string     `json:"groupBy"`
+	Function          string     `json:"function"`
+	Exclude           []string   `json:"exclude"`
 	Start             *time.Time
 	End               *time.Time
 }
@@ -209,10 +270,10 @@ type TagFilterParams struct {
 }
 
 type TTLParams struct {
-	Type                  string  // It can be one of {traces, metrics}.
-	ColdStorageVolume     string  // Name of the cold storage volume.
-	ToColdStorageDuration float64 // Seconds after which data will be moved to cold storage.
-	DelDuration           float64 // Seconds after which data will be deleted.
+	Type                  string // It can be one of {traces, metrics}.
+	ColdStorageVolume     string // Name of the cold storage volume.
+	ToColdStorageDuration int64  // Seconds after which data will be moved to cold storage.
+	DelDuration           int64  // Seconds after which data will be deleted.
 }
 
 type GetTTLParams struct {
@@ -232,14 +293,14 @@ type GetErrorParams struct {
 }
 
 type FilterItem struct {
-	Key       string      `yaml:"key" json:"key"`
-	Value     interface{} `yaml:"value" json:"value"`
-	Operation string      `yaml:"op" json:"op"`
+	Key       string      `json:"key"`
+	Value     interface{} `json:"value"`
+	Operation string      `json:"op"`
 }
 
 type FilterSet struct {
-	Operation string       `yaml:"op,omitempty" json:"op,omitempty"`
-	Items     []FilterItem `yaml:"items" json:"items"`
+	Operation string       `json:"op,omitempty"`
+	Items     []FilterItem `json:"items"`
 }
 
 func formattedValue(v interface{}) string {
@@ -273,21 +334,21 @@ func formattedValue(v interface{}) string {
 	}
 }
 
-func (fs *FilterSet) BuildMetricsFilterQuery() (string, error) {
+func (fs *FilterSet) BuildMetricsFilterQuery(tableName string) (string, error) {
 	queryString := ""
 	for idx, item := range fs.Items {
 		fmtVal := formattedValue(item.Value)
 		switch op := strings.ToLower(item.Operation); op {
 		case "eq":
-			queryString += fmt.Sprintf("JSONExtractString(labels,'%s') = %s", item.Key, fmtVal)
+			queryString += fmt.Sprintf("JSONExtractString(%s.labels,'%s') = %s", tableName, item.Key, fmtVal)
 		case "neq":
-			queryString += fmt.Sprintf("JSONExtractString(labels,'%s') != %s", item.Key, fmtVal)
+			queryString += fmt.Sprintf("JSONExtractString(%s.labels,'%s') != %s", tableName, item.Key, fmtVal)
 		case "in":
-			queryString += fmt.Sprintf("JSONExtractString(labels,'%s') IN %s", item.Key, fmtVal)
+			queryString += fmt.Sprintf("JSONExtractString(%s.labels,'%s') IN %s", tableName, item.Key, fmtVal)
 		case "nin":
-			queryString += fmt.Sprintf("JSONExtractString(labels,'%s') NOT IN %s", item.Key, fmtVal)
+			queryString += fmt.Sprintf("JSONExtractString(%s.labels,'%s') NOT IN %s", tableName, item.Key, fmtVal)
 		case "like":
-			queryString += fmt.Sprintf("JSONExtractString(labels,'%s') LIKE %s", item.Key, fmtVal)
+			queryString += fmt.Sprintf("JSONExtractString(%s.labels,'%s') LIKE %s", tableName, item.Key, fmtVal)
 		default:
 			return "", fmt.Errorf("unsupported operation")
 		}
@@ -301,22 +362,4 @@ func (fs *FilterSet) BuildMetricsFilterQuery() (string, error) {
 func (fs *FilterSet) BuildTracesFilterQuery() (string, error) {
 	// TODO
 	return "", nil
-}
-
-type MetricQuery struct {
-	MetricName        string     `yaml:"metricName" json:"metricName"`
-	TagFilters        *FilterSet `yaml:"tagFilters,omitempty" json:"tagFilters,omitempty"`
-	GroupingTags      []string   `yaml:"groupBy,omitempty" json:"groupBy,omitempty"`
-	AggregateOperator string     `yaml:"aggregateOperator,omitempty" json:"aggregateOperator,omitempty"`
-}
-
-type CompositeMetricQuery struct {
-	BuildMetricQueries []*MetricQuery `yaml:"buildMetricQueries,omitempty" json:"buildMetricQueries"`
-	Formulas           []string       `yaml:"formulas,omitempty" json:"formulas,omitempty"`
-	RawQuery           string         `yaml:"rawQuery,omitempty" json:"rawQuery,omitempty"`
-}
-
-func (cmq *CompositeMetricQuery) BuildQuery() string {
-	// todo(amol): need to add build metric query
-	return cmq.RawQuery
 }

@@ -2722,3 +2722,43 @@ func (r *ClickHouseReader) GetErrorForType(ctx context.Context, queryParams *mod
 	return &getErrorWithSpanReponse, nil
 
 }
+
+func (r *ClickHouseReader) GetAlertQueryResult() (rules.Vector, error) {
+	rows, err := r.db.Query(ctx, query)
+
+	var (
+		columnTypes = rows.ColumnTypes()
+		columnNames = row.Columns()
+		vars        = make([]interface{}, len(columnTypes))
+	)
+
+	for i := range columnTypes {
+		vars[i] = reflect.New(columnTypes[i].ScanType()).Interface()
+	}
+	var result rules.Vector 
+
+	defer rows.Close()
+	for rows.Next() {
+		if err := rows.Scan(vars...); err != nil {
+			return nil, err
+		}
+		sample := make(rules.Sample, 0)
+		var lbls := labels.NewBuilder(labels.Labels{})
+		
+		for i, v := range vars {
+			switch v := v.(type) {
+			case *string:
+				lbls.Set(columnNames[i], *v)		
+			case *time.Time:
+				sample.Point.T = *v
+			case *float64:
+				sample.Point.V = *v
+			}
+		}
+		// capture lables in result
+		sample.Metric = lbls.Labels()
+
+		result = append(result, sample)
+	}
+	return result, nil
+}
