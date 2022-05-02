@@ -76,16 +76,10 @@ type Alert struct {
 	ValidUntil time.Time
 }
 
-type Expr interface {
-	String() string
-}
-
 type AlertingRule struct {
-	name  string
-	query qsmodel.QueryRangeParamsV2
-
-	// The vector expression from which to generate alerts.
-	// vector promql.Expr
+	name string
+	// todo(amol): handle older alerting rule versions
+	queryBuilder *qsmodel.QueryRangeParamsV2
 
 	holdDuration time.Duration
 	labels       labels.Labels
@@ -111,17 +105,28 @@ type AlertingRule struct {
 
 func NewAlertingRule(
 	name string,
-	//expr promql.Expr,
-	query qsmodel.QueryRangeParamsV2,
+	queryBuilder *qsmodel.QueryRangeParamsV2,
 	hold time.Duration,
 	labels, annotations labels.Labels,
 	logger log.Logger,
 ) *AlertingRule {
-
+	q := &qsmodel.QueryRangeParamsV2{
+		Start: 1650991982000,
+		End:   1651078382000,
+		Step:  "1 HOUR",
+		CompositeMetricQuery: &qsmodel.CompositeMetricQuery{
+			RawQuery: `SELECT '3dwe3e324' fingerprint, 1651387726874 ts, 12.12 res FROM system.one`,
+			BuildMetricQueries: []*qsmodel.MetricQuery{
+				{
+					MetricName:        "signoz_latency_count",
+					AggregateOperator: "rate",
+				},
+			},
+		},
+	}
 	return &AlertingRule{
-		name:  name,
-		query: query,
-		// vector:       expr,
+		name:         name,
+		queryBuilder: q,
 		holdDuration: hold,
 		labels:       labels,
 		annotations:  annotations,
@@ -323,20 +328,17 @@ func (r *AlertingRule) sendAlerts(ctx context.Context, ts time.Time, resendDelay
 }
 
 func (r *AlertingRule) prepareQueryRange(ts time.Time) *qsmodel.QueryRangeParamsV2 {
-	queryRange := r.query
+	queryRange := r.queryBuilder
 
-	queryRange.End = ts.Unix()
-
-	// todo(amol): need to convert the step to integer
-	// queryRange.Step =
-	queryRange.Start = ts.Add(-time.Duration(1 * time.Minute)).Unix()
-	queryRange.Step = "1 Minute"
-	return &queryRange
+	queryRange.End = ts.UnixNano() / int64(time.Millisecond)
+	queryRange.Start = ts.Add(-time.Duration(1*time.Hour)).UnixNano() / int64(time.Millisecond)
+	return queryRange
 }
 
 func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, externalURL *url.URL) (Vector, error) {
 	// todo(amol): get the name of table in build query
 	buildQueries, err := r.prepareQueryRange(ts).BuildQuery("time_series")
+	fmt.Println("queries:", buildQueries)
 	if len(buildQueries) == 0 {
 		// todo(amol): add log
 		return nil, fmt.Errorf(fmt.Sprintf("failed to build query for rule %s", r.name))
@@ -463,13 +465,11 @@ func (r *AlertingRule) Eval(ctx context.Context, ts time.Time, query QueryFunc, 
 
 func (r *AlertingRule) String() string {
 	ar := PostableRule{
-		Alert: r.name,
-		// todo(amol): need to use json marshaling here
-		// QueryBuilder: r.Query.String(),
-		Expr:        "", // r.vector.String(),
-		For:         time.Duration(r.holdDuration),
-		Labels:      r.labels.Map(),
-		Annotations: r.annotations.Map(),
+		Alert:        r.name,
+		QueryBuilder: r.queryBuilder,
+		For:          time.Duration(r.holdDuration),
+		Labels:       r.labels.Map(),
+		Annotations:  r.annotations.Map(),
 	}
 
 	byt, err := yaml.Marshal(ar)

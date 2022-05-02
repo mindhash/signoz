@@ -16,12 +16,11 @@ import (
 
 // PostableRule is used to create alerting rule from HTTP api
 type PostableRule struct {
-	Alert       string                       `yaml:"alert,omitempty"`
-	Query       qsmodel.CompositeMetricQuery `yaml:"query,omitempty"`
-	Expr        string                       `yaml:"expr,omitempty"`
-	For         time.Duration                `yaml:"for,omitempty"`
-	Labels      map[string]string            `yaml:"labels,omitempty"`
-	Annotations map[string]string            `yaml:"annotations,omitempty"`
+	Alert        string                      `yaml:"alert,omitempty"`
+	QueryBuilder *qsmodel.QueryRangeParamsV2 `yaml:"queryBuilder,omitempty"`
+	For          time.Duration               `yaml:"for,omitempty"`
+	Labels       map[string]string           `yaml:"labels,omitempty"`
+	Annotations  map[string]string           `yaml:"annotations,omitempty"`
 }
 
 func ParsePostableRule(content []byte) (*PostableRule, []error) {

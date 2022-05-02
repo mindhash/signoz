@@ -404,6 +404,8 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 				rule.SetHealth(HealthBad)
 				rule.SetLastError(err)
 
+				level.Warn(g.logger).Log("msg", "Evaluating rule failed", "rule", rule, "err", err)
+
 				// Canceled queries are intentional termination of queries. This normally
 				// happens on shutdown and thus we skip logging of any errors here.
 				//! if _, ok := err.(promql.ErrQueryCanceled); !ok {
@@ -650,7 +652,7 @@ func (m *Manager) LoadGroup(interval time.Duration, rule string, groupName strin
 	if r.Alert != "" {
 		rules = append(rules, NewAlertingRule(
 			r.Alert,
-			r.Query,
+			r.QueryBuilder,
 			time.Duration(r.For),
 			labels.FromMap(r.Labels),
 			labels.FromMap(r.Annotations),

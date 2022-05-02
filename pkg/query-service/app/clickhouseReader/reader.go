@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -468,29 +469,6 @@ func connect(cfg *namespaceConfig) (*sqlx.DB, error) {
 	}
 
 	return cfg.Connector(cfg)
-}
-
-func RuleQueryFunc(reader *ClickHouseReader) rules.QueryFunc {
-	return func(ctx context.Context, qs string, t time.Time) (rules.Vector, error) {
-		fmt.Println("query:", qs)
-		// just run the ch query and return results in vector format
-		if time.Now().After(reader.startedAt.Add(1 * time.Minute)) {
-			fmt.Println("Resolving the alert")
-			return nil, nil
-		}
-		fmt.Println("firing the alert")
-		return rules.Vector{
-			rules.Sample{
-				Point: rules.Point{T: t.Unix(), V: 1},
-				Metric: labels.Labels{
-					labels.Label{
-						Name:  "service_name",
-						Value: "goApp",
-					},
-				},
-			},
-		}, nil
-	}
 }
 
 type byAlertStateAndNameSorter struct {
@@ -2723,36 +2701,101 @@ func (r *ClickHouseReader) GetErrorForType(ctx context.Context, queryParams *mod
 
 }
 
-func (r *ClickHouseReader) GetAlertQueryResult() (rules.Vector, error) {
-	rows, err := r.db.Query(ctx, query)
+func RuleQueryFunc(reader *ClickHouseReader) rules.QueryFunc {
+	return func(ctx context.Context, qs string, t time.Time) (rules.Vector, error) {
+		// fmt.Println("query:", qs)
+		// just run the ch query and return results in vector format
+		// if time.Now().After(reader.startedAt.Add(1 * time.Minute)) {
+		// 	fmt.Println("Resolving the alert")
+		// 	return nil, nil
+		// }
+		// fmt.Println("firing the alert")
+		// return rules.Vector{
+		// 	rules.Sample{
+		// 		Point: rules.Point{T: t.Unix(), V: 1},
+		// 		Metric: labels.Labels{
+		// 			labels.Label{
+		// 				Name:  "service_name",
+		// 				Value: "goApp",
+		// 			},
+		// 		},
+		// 	},
+		// }, nil
 
-	var (
-		columnTypes = rows.ColumnTypes()
-		columnNames = row.Columns()
-		vars        = make([]interface{}, len(columnTypes))
-	)
+		return reader.GetAlertQueryResult(ctx, qs)
+	}
+}
+
+func (r *ClickHouseReader) GetAlertQueryResult(ctx context.Context, query string) (rules.Vector, error) {
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		fmt.Println("failed to get alert query result")
+		return nil, err
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+	columnNames, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	vars := make([]interface{}, len(columnTypes))
 
 	for i := range columnTypes {
 		vars[i] = reflect.New(columnTypes[i].ScanType()).Interface()
 	}
-	var result rules.Vector 
+	var result rules.Vector
 
 	defer rows.Close()
 	for rows.Next() {
+		fmt.Println("first row:")
 		if err := rows.Scan(vars...); err != nil {
 			return nil, err
 		}
-		sample := make(rules.Sample, 0)
-		var lbls := labels.NewBuilder(labels.Labels{})
-		
+
+		sample := rules.Sample{}
+		lbls := labels.NewBuilder(labels.Labels{})
+
 		for i, v := range vars {
+			colName := columnNames[i]
 			switch v := v.(type) {
 			case *string:
-				lbls.Set(columnNames[i], *v)		
+				lbls.Set(colName, *v)
 			case *time.Time:
-				sample.Point.T = *v
+				timval := *v
+
+				if colName == "ts" {
+					sample.Point.T = timval.Unix()
+				} else {
+					lbls.Set(colName, timval.Format("2006-01-02 15:04:05"))
+				}
+
 			case *float64:
-				sample.Point.V = *v
+				if colName == "res" {
+					sample.Point.V = *v
+				} else {
+					lbls.Set(colName, fmt.Sprintf("%f", *v))
+				}
+			case *uint64:
+				intv := *v
+				if colName == "res" {
+					sample.Point.V = float64(intv)
+				} else {
+					lbls.Set(colName, fmt.Sprintf("%d", intv))
+				}
+			case *uint8:
+				intv := *v
+				if colName == "res" {
+					sample.Point.V = float64(intv)
+				} else {
+					lbls.Set(colName, fmt.Sprintf("%d", intv))
+				}
+			default:
+				// todo(amol): raise error
+				fmt.Println("var", v, columnNames[i])
 			}
 		}
 		// capture lables in result
