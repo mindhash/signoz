@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux';
 import { AppState } from 'store/reducers';
 import AppReducer from 'types/reducer/app';
 
+import Authentication from './Authentication';
 import DisplayName from './DisplayName';
 import Members from './Members';
 import PendingInvitesContainer from './PendingInvitesContainer';
@@ -27,6 +28,8 @@ function OrganizationSettings(): JSX.Element {
 					/>
 				))}
 			</Space>
+			<Divider />
+			<Authentication />
 			<Divider />
 			<PendingInvitesContainer />
 			<Divider />

@@ -7,12 +7,23 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from 'react-query';
 import { useSelector } from 'react-redux';
+import { useLocation } from 'react-router-dom';
 import { AppState } from 'store/reducers';
 import AppReducer from 'types/reducer/app';
+
+function useURLQuery(): URLSearchParams {
+	const { search } = useLocation();
+
+	return React.useMemo(() => new URLSearchParams(search), [search]);
+}
 
 function Login(): JSX.Element {
 	const { isLoggedIn } = useSelector<AppState, AppReducer>((state) => state.app);
 	const { t } = useTranslation();
+	const urlQueryParams = useURLQuery();
+	const jwt = urlQueryParams.get('jwt') || '';
+	const refreshJwt = urlQueryParams.get('refreshJwt') || '';
+	const userId = urlQueryParams.get('usr') || '';
 
 	const versionResult = useQuery({
 		queryFn: getUserVersion,
@@ -39,7 +50,7 @@ function Login(): JSX.Element {
 
 	return (
 		<WelcomeLeftContainer version={version}>
-			<LoginContainer />
+			<LoginContainer jwt={jwt} refreshJwt={refreshJwt} userId={userId} />
 		</WelcomeLeftContainer>
 	);
 }
