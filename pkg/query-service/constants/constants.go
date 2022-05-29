@@ -56,6 +56,7 @@ const (
 	Descending       = "descending"
 	Ascending        = "ascending"
 	ContextTimeout   = 60 // seconds
+	DefaultSAMLHost  = "http://localhost:8080"
 )
 
 func GetOrDefaultEnv(key string, fallback string) string {
@@ -64,4 +65,8 @@ func GetOrDefaultEnv(key string, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func GetSAMLHost() string {
+	return GetOrDefaultEnv("SIGNOZ_SAML_HOST", DefaultSAMLHost)
 }

@@ -54,6 +54,7 @@ func main() {
 	if err := server.Start(); err != nil {
 		logger.Fatal("Could not start servers", zap.Error(err))
 	}
+
 	if err := auth.InitAuthCache(context.Background()); err != nil {
 		logger.Fatal("Failed to initialize auth cache", zap.Error(err))
 	}

@@ -4,7 +4,7 @@ import (
 	baseApp "go.signoz.io/query-service/app"
 )
 
-type DatabaseReader interface {
+type EventReader interface {
 	Start()
 	baseApp.Reader
 }

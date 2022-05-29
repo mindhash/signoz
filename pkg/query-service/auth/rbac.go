@@ -10,6 +10,7 @@ import (
 	"go.signoz.io/query-service/constants"
 	"go.signoz.io/query-service/dao"
 	"go.signoz.io/query-service/model"
+	"go.uber.org/zap"
 )
 
 type Group struct {
@@ -53,11 +54,13 @@ func InitAuthCache(ctx context.Context) error {
 func GetUserFromRequest(r *http.Request) (*model.UserPayload, error) {
 	accessJwt, err := ExtractJwtFromRequest(r)
 	if err != nil {
+		zap.S().Errorf("failed to extract jwt from request: %v", err)
 		return nil, err
 	}
 
 	user, err := validateUser(accessJwt)
 	if err != nil {
+		zap.S().Errorf("failed to extract user from jwt: %v", err)
 		return nil, err
 	}
 	return user, nil

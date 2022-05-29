@@ -27,6 +27,7 @@ type Queries interface {
 	GetOrgs(ctx context.Context) ([]model.Organization, *model.ApiError)
 	GetOrgByName(ctx context.Context, name string) (*model.Organization, *model.ApiError)
 	GetOrg(ctx context.Context, id string) (*model.Organization, *model.ApiError)
+	GetSingleOrg(ctx context.Context) (*model.Organization, *model.ApiError)
 
 	GetResetPasswordEntry(ctx context.Context, token string) (*model.ResetPasswordEntry, *model.ApiError)
 	GetUsersByOrg(ctx context.Context, orgId string) ([]model.UserPayload, *model.ApiError)

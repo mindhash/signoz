@@ -2,15 +2,14 @@ package auth
 
 import (
 	"context"
-	"net/http"
-	"time"
-
 	jwtmiddleware "github.com/auth0/go-jwt-middleware"
 	"github.com/golang-jwt/jwt"
 	"github.com/pkg/errors"
 	"go.signoz.io/query-service/model"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
+	"net/http"
+	"time"
 )
 
 var (
@@ -91,4 +90,45 @@ func ExtractJwtFromContext(ctx context.Context) (string, error) {
 
 func ExtractJwtFromRequest(r *http.Request) (string, error) {
 	return jwtmiddleware.FromAuthHeader(r)
+}
+
+type UserJwtToken struct {
+	AccessToken   string
+	AccessExpiry  int64
+	RefreshToken  string
+	RefreshExpiry int64
+	// optional
+	UserID string
+}
+
+func GenerateJWTForUser(user *model.User) (UserJwtToken, error) {
+	t := UserJwtToken{}
+	var err error
+	t.AccessExpiry = time.Now().Add(JwtExpiry).Unix()
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    user.Id,
+		"gid":   user.GroupId,
+		"email": user.Email,
+		"exp":   t.AccessExpiry,
+	})
+
+	t.AccessToken, err = token.SignedString([]byte(JwtSecret))
+	if err != nil {
+		return t, errors.Errorf("failed to encode jwt: %v", err)
+	}
+
+	t.RefreshExpiry = time.Now().Add(JwtRefresh).Unix()
+	token = jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"id":    user.Id,
+		"gid":   user.GroupId,
+		"email": user.Email,
+		"exp":   t.RefreshExpiry,
+	})
+
+	t.RefreshToken, err = token.SignedString([]byte(JwtSecret))
+	if err != nil {
+		return t, errors.Errorf("failed to encode jwt: %v", err)
+	}
+	return t, nil
 }

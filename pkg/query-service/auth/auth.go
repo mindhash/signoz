@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"go.signoz.io/query-service/constants"
@@ -299,38 +298,16 @@ func Login(ctx context.Context, request *model.LoginRequest) (*model.LoginRespon
 		return nil, err
 	}
 
-	accessJwtExpiry := time.Now().Add(JwtExpiry).Unix()
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"id":    user.Id,
-		"gid":   user.GroupId,
-		"email": user.Email,
-		"exp":   accessJwtExpiry,
-	})
-
-	accessJwt, err := token.SignedString([]byte(JwtSecret))
+	tokenStore, err := GenerateJWTForUser(&user.User)
 	if err != nil {
-		return nil, errors.Errorf("failed to encode jwt: %v", err)
-	}
-
-	refreshJwtExpiry := time.Now().Add(JwtRefresh).Unix()
-	token = jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"id":    user.Id,
-		"gid":   user.GroupId,
-		"email": user.Email,
-		"exp":   refreshJwtExpiry,
-	})
-
-	refreshJwt, err := token.SignedString([]byte(JwtSecret))
-	if err != nil {
-		return nil, errors.Errorf("failed to encode jwt: %v", err)
+		return nil, err
 	}
 
 	return &model.LoginResponse{
-		AccessJwt:        accessJwt,
-		AccessJwtExpiry:  accessJwtExpiry,
-		RefreshJwt:       refreshJwt,
-		RefreshJwtExpiry: refreshJwtExpiry,
+		AccessJwt:        tokenStore.AccessToken,
+		AccessJwtExpiry:  tokenStore.AccessExpiry,
+		RefreshJwt:       tokenStore.RefreshToken,
+		RefreshJwtExpiry: tokenStore.RefreshExpiry,
 		UserId:           user.Id,
 	}, nil
 }

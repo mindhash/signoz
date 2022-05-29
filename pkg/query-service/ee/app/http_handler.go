@@ -3,22 +3,25 @@ package app
 import (
 	"github.com/gorilla/mux"
 	baseApp "go.signoz.io/query-service/app"
-	"go.signoz.io/query-service/dao"
+	eeDao "go.signoz.io/query-service/ee/dao"
+	"net/http"
 )
 
 type APIHandler struct {
-	reader DatabaseReader
+	ch     EventReader
+	qsRepo eeDao.ModelDao
 	*baseApp.APIHandler
 }
 
 // NewAPIHandler returns an APIHandler
-func NewAPIHandler(reader DatabaseReader, relDB dao.ModelDao) (*APIHandler, error) {
-	baseHandler, err := baseApp.NewAPIHandler(reader, relDB, "../config/dashboards")
+func NewAPIHandler(reader EventReader, qsrepo eeDao.ModelDao) (*APIHandler, error) {
+	baseHandler, err := baseApp.NewAPIHandler(reader, qsrepo, "../config/dashboards")
 	if err != nil {
 		return nil, err
 	}
 	ah := &APIHandler{
-		reader:     reader,
+		ch:         reader,
+		qsRepo:     qsrepo,
 		APIHandler: baseHandler,
 	}
 	return ah, nil
@@ -27,4 +30,5 @@ func NewAPIHandler(reader DatabaseReader, relDB dao.ModelDao) (*APIHandler, erro
 // RegisterRoutes registers routes for this handler on the given router
 func (aH *APIHandler) RegisterRoutes(router *mux.Router) {
 	aH.APIHandler.RegisterRoutes(router)
+	router.HandleFunc("/api/v1/organization/{org_id}/complete/saml", baseApp.OpenAccess(aH.ReceiveSAML)).Methods(http.MethodPost)
 }

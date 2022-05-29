@@ -7,8 +7,9 @@ import (
 	"github.com/rs/cors"
 	"go.signoz.io/query-service/app/dashboards"
 	"go.signoz.io/query-service/constants"
-	"go.signoz.io/query-service/dao"
+
 	db "go.signoz.io/query-service/ee/app/db"
+	"go.signoz.io/query-service/ee/dao"
 	"go.signoz.io/query-service/healthcheck"
 	"go.signoz.io/query-service/utils"
 
@@ -36,15 +37,18 @@ func (s Server) HealthCheckStatus() chan healthcheck.Status {
 }
 
 func NewServer(serverOptions *ServerOptions) (*Server, error) {
-	if err := dao.InitDao("sqlite", constants.RELATIONAL_DATASOURCE_PATH); err != nil {
+	modelDao, err := dao.InitDao("sqlite", constants.RELATIONAL_DATASOURCE_PATH)
+	if err != nil {
 		return nil, err
 	}
+	fmt.Println("db:", modelDao.DB())
+
 	s := &Server{
 		serverOptions:      serverOptions,
 		unavailableChannel: make(chan healthcheck.Status),
 	}
 
-	httpServer, err := s.createHTTPServer()
+	httpServer, err := s.createHTTPServer(modelDao)
 	if err != nil {
 		return nil, err
 	} else {
@@ -54,25 +58,25 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) createHTTPServer() (*http.Server, error) {
+func (s *Server) createHTTPServer(repo dao.ModelDao) (*http.Server, error) {
 	localDB, err := dashboards.InitDB(constants.RELATIONAL_DATASOURCE_PATH)
 	if err != nil {
 		return nil, err
 	}
 	localDB.SetMaxOpenConns(10)
 
-	var dbReader DatabaseReader
+	var ch EventReader
 
 	storage := os.Getenv("STORAGE")
 	if storage == "clickhouse" {
 		zap.S().Info("Using ClickHouse as datastore ...")
-		dbReader = db.NewDBReader(localDB)
-		go dbReader.Start()
+		ch = db.NewClickhouseReader(localDB)
+		go ch.Start()
 	} else {
 		return nil, fmt.Errorf("Storage type: %s is not supported in query service", storage)
 	}
 
-	apiHandler, err := NewAPIHandler(dbReader, dao.DB())
+	apiHandler, err := NewAPIHandler(ch, repo)
 	if err != nil {
 		return nil, err
 	}

@@ -518,3 +518,26 @@ func (mds *ModelDaoSqlite) GetResetPasswordEntry(ctx context.Context,
 	}
 	return &entries[0], nil
 }
+
+func (mds *ModelDaoSqlite) GetSingleOrg(ctx context.Context) (*model.Organization, *model.ApiError) {
+	orgs := []model.Organization{}
+	err := mds.db.Select(&orgs, `SELECT * FROM organizations`)
+
+	if err != nil {
+		return nil, &model.ApiError{Typ: model.ErrorInternal, Err: err}
+	}
+
+	if len(orgs) > 1 {
+		return nil, &model.ApiError{
+			Typ: model.ErrorInternal,
+			Err: errors.New("found more than one org in a single org installation"),
+		}
+	}
+	if len(orgs) == 0 {
+		return nil, &model.ApiError{
+			Typ: model.ErrorInternal,
+			Err: errors.New("unexpected error, no org found"),
+		}
+	}
+	return &orgs[0], nil
+}

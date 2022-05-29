@@ -16,6 +16,10 @@ type ModelDaoSqlite struct {
 	db *sqlx.DB
 }
 
+func (mds *ModelDaoSqlite) DB() *sqlx.DB {
+	return mds.db
+}
+
 // InitDB sets up setting up the connection pool global variable.
 func InitDB(dataSourceName string) (*ModelDaoSqlite, error) {
 	var err error

@@ -8,21 +8,21 @@ import (
 	baseAppCh "go.signoz.io/query-service/app/clickhouseReader"
 )
 
-type databaseReader struct {
-	EventDB clickhouse.Conn
-	RelDB   *sqlx.DB
+type clickhouseReader struct {
+	ch   clickhouse.Conn
+	qsdb *sqlx.DB
 	*baseAppCh.ClickHouseReader
 }
 
-func NewDBReader(localDB *sqlx.DB) *databaseReader {
+func NewClickhouseReader(localDB *sqlx.DB) *clickhouseReader {
 	baseReader := baseAppCh.NewReader(localDB)
-	return &databaseReader{
-		EventDB:          baseReader.GetDB(),
-		RelDB:            baseReader.GetRelationalDB(),
+	return &clickhouseReader{
+		ch:               baseReader.GetDB(),
+		qsdb:             baseReader.GetRelationalDB(),
 		ClickHouseReader: baseReader,
 	}
 }
 
-func (d *databaseReader) Start() {
-	d.ClickHouseReader.Start()
+func (r *clickhouseReader) Start() {
+	r.ClickHouseReader.Start()
 }
