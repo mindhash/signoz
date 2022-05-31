@@ -1,14 +1,15 @@
 package constants
 
-const BasicPlan =  map[string]bool{
+type SupportedFeatures map[string]bool
 
+var BasicPlan = SupportedFeatures{}
+
+var ProPlan = SupportedFeatures{
+	"SAML": false,
 }
 
-const ProPlan = map[string]bool{
+var EnterprisePlan = SupportedFeatures{
 	"SAML": true,
 }
 
-const EnterprisePlan =  map[string]bool{
-	"SAML": true,
-}
-}
+const FEATURES_SAML = "SAML"

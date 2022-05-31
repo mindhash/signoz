@@ -1,4 +1,5 @@
 import { Divider, Space } from 'antd';
+import useEEAvailable from 'hooks/useEEAvailable';
 import React from 'react';
 import { useSelector } from 'react-redux';
 import { AppState } from 'store/reducers';
@@ -10,6 +11,7 @@ import Members from './Members';
 import PendingInvitesContainer from './PendingInvitesContainer';
 
 function OrganizationSettings(): JSX.Element {
+	const ee = useEEAvailable();
 	const { org } = useSelector<AppState, AppReducer>((state) => state.app);
 
 	if (!org) {
@@ -29,8 +31,12 @@ function OrganizationSettings(): JSX.Element {
 				))}
 			</Space>
 			<Divider />
-			<Authentication />
-			<Divider />
+			{ee && (
+				<>
+					<Authentication />
+					<Divider />
+				</>
+			)}
 			<PendingInvitesContainer />
 			<Divider />
 			<Members />

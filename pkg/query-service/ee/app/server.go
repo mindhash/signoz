@@ -76,7 +76,12 @@ func (s *Server) createHTTPServer(repo dao.ModelDao) (*http.Server, error) {
 		return nil, fmt.Errorf("Storage type: %s is not supported in query service", storage)
 	}
 
-	apiHandler, err := NewAPIHandler(ch, repo)
+	lm, err := license.NewLicenseManager(localDB)
+	if err != nil {
+		return nil, err
+	}
+
+	apiHandler, err := NewAPIHandler(ch, repo, lm)
 	if err != nil {
 		return nil, err
 	}

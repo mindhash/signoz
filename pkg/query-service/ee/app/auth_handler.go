@@ -12,13 +12,19 @@ import (
 
 func (aH *APIHandler) ReceiveSAML(w http.ResponseWriter, r *http.Request) {
 	orgID := mux.Vars(r)["org_id"]
-	redirectUri := "http://localhost:3301/login"
+	redirectUri := constants.GetSAMLRedirectURL()
 
 	// get org
 	org, apiError := aH.qsRepo.GetOrg(context.Background(), orgID)
 	if apiError != nil {
 		zap.S().Errorf("[ReceiveSAML] failed to fetch organization (%s): %v", orgID, apiError)
 		http.Redirect(w, r, fmt.Sprintf("%s?ssoerror=%s", redirectUri, "failed to identify user organization, please contact your administrator"), 301)
+		return
+	}
+
+	if ok := aH.licenseManager.CheckFeature(org.ID, Constants.FEATURES_SAML); !ok {
+		zap.S().Errorf("[ReceiveSAML] feature unavailable %s in org %s", constants.FEATURES_SAML, org.ID)
+		http.Redirect(w, r, fmt.Sprintf("%s?ssoerror=%s", redirectUri, "feature unavailable, please upgrade your billing plan to access this feature"), 301)
 		return
 	}
 

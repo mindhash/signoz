@@ -762,7 +762,7 @@ func (aH *APIHandler) getTopEndpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -778,7 +778,7 @@ func (aH *APIHandler) getUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -794,7 +794,7 @@ func (aH *APIHandler) getServiceOverview(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -816,7 +816,7 @@ func (aH *APIHandler) getServices(w http.ResponseWriter, r *http.Request) {
 
 	telemetry.GetInstance().SendEvent(telemetry.TELEMETRY_EVENT_NUMBER_OF_SERVICES, data)
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) serviceMapDependencies(w http.ResponseWriter, r *http.Request) {
@@ -831,7 +831,7 @@ func (aH *APIHandler) serviceMapDependencies(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) getServicesList(w http.ResponseWriter, r *http.Request) {
@@ -841,7 +841,7 @@ func (aH *APIHandler) getServicesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -855,7 +855,7 @@ func (aH *APIHandler) searchTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -870,7 +870,7 @@ func (aH *APIHandler) getErrors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -885,7 +885,7 @@ func (aH *APIHandler) getErrorForId(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -900,7 +900,7 @@ func (aH *APIHandler) getErrorForType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -917,7 +917,7 @@ func (aH *APIHandler) getSpanFilters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) getFilteredSpans(w http.ResponseWriter, r *http.Request) {
@@ -933,7 +933,7 @@ func (aH *APIHandler) getFilteredSpans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) getFilteredSpanAggregates(w http.ResponseWriter, r *http.Request) {
@@ -949,7 +949,7 @@ func (aH *APIHandler) getFilteredSpanAggregates(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) getTagFilters(w http.ResponseWriter, r *http.Request) {
@@ -965,7 +965,7 @@ func (aH *APIHandler) getTagFilters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) getTagValues(w http.ResponseWriter, r *http.Request) {
@@ -981,7 +981,7 @@ func (aH *APIHandler) getTagValues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) setTTL(w http.ResponseWriter, r *http.Request) {
@@ -996,7 +996,7 @@ func (aH *APIHandler) setTTL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 
 }
 
@@ -1011,7 +1011,7 @@ func (aH *APIHandler) getTTL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) getDisks(w http.ResponseWriter, r *http.Request) {
@@ -1020,12 +1020,12 @@ func (aH *APIHandler) getDisks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, result)
+	aH.WriteJSON(w, r, result)
 }
 
 func (aH *APIHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 	version := version.GetVersion()
-	aH.writeJSON(w, r, map[string]string{"version": version})
+	aH.WriteJSON(w, r, map[string]string{"version": version, "eeAvailable": ""})
 }
 
 // inviteUser is used to invite a user. It is used by an admin api.
@@ -1041,7 +1041,7 @@ func (aH *APIHandler) inviteUser(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, &model.ApiError{Err: err, Typ: model.ErrorInternal}, nil)
 		return
 	}
-	aH.writeJSON(w, r, resp)
+	aH.WriteJSON(w, r, resp)
 }
 
 // getInvite returns the invite object details for the given invite token. We do not need to
@@ -1054,7 +1054,7 @@ func (aH *APIHandler) getInvite(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, &model.ApiError{Err: err, Typ: model.ErrorNotFound}, nil)
 		return
 	}
-	aH.writeJSON(w, r, resp)
+	aH.WriteJSON(w, r, resp)
 }
 
 // revokeInvite is used to revoke an invite.
@@ -1066,7 +1066,7 @@ func (aH *APIHandler) revokeInvite(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, &model.ApiError{Err: err, Typ: model.ErrorInternal}, nil)
 		return
 	}
-	aH.writeJSON(w, r, map[string]string{"data": "invite revoked successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "invite revoked successfully"})
 }
 
 // listPendingInvites is used to list the pending invites.
@@ -1097,7 +1097,7 @@ func (aH *APIHandler) listPendingInvites(w http.ResponseWriter, r *http.Request)
 			Organization: org.Name,
 		})
 	}
-	aH.writeJSON(w, r, resp)
+	aH.WriteJSON(w, r, resp)
 }
 
 // precheckLogin checks if SSO or SAML is available, the check happens
@@ -1147,7 +1147,7 @@ func (aH *APIHandler) precheckLogin(w http.ResponseWriter, r *http.Request) {
 		precheckResp.SAMLLoginUrl = loginURL
 	}
 
-	aH.writeJSON(w, r, precheckResp)
+	aH.WriteJSON(w, r, precheckResp)
 }
 
 func (aH *APIHandler) registerUser(w http.ResponseWriter, r *http.Request) {
@@ -1162,7 +1162,7 @@ func (aH *APIHandler) registerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, map[string]string{"data": "user registered successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "user registered successfully"})
 }
 
 func (aH *APIHandler) loginUser(w http.ResponseWriter, r *http.Request) {
@@ -1195,7 +1195,7 @@ func (aH *APIHandler) loginUser(w http.ResponseWriter, r *http.Request) {
 	// 	HttpOnly: true,
 	// })
 
-	aH.writeJSON(w, r, resp)
+	aH.WriteJSON(w, r, resp)
 }
 
 func (aH *APIHandler) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -1209,7 +1209,7 @@ func (aH *APIHandler) listUsers(w http.ResponseWriter, r *http.Request) {
 	for i := range users {
 		users[i].Password = ""
 	}
-	aH.writeJSON(w, r, users)
+	aH.WriteJSON(w, r, users)
 }
 
 func (aH *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
@@ -1232,7 +1232,7 @@ func (aH *APIHandler) getUser(w http.ResponseWriter, r *http.Request) {
 
 	// No need to send password hash for the user object.
 	user.Password = ""
-	aH.writeJSON(w, r, user)
+	aH.WriteJSON(w, r, user)
 }
 
 // editUser only changes the user's Name and ProfilePictureURL. It is intentionally designed
@@ -1273,7 +1273,7 @@ func (aH *APIHandler) editUser(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, apiErr, nil)
 		return
 	}
-	aH.writeJSON(w, r, map[string]string{"data": "user updated successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "user updated successfully"})
 }
 
 func (aH *APIHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
@@ -1320,7 +1320,7 @@ func (aH *APIHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, err, "Failed to delete user")
 		return
 	}
-	aH.writeJSON(w, r, map[string]string{"data": "user deleted successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "user deleted successfully"})
 }
 
 func (aH *APIHandler) getRole(w http.ResponseWriter, r *http.Request) {
@@ -1344,7 +1344,7 @@ func (aH *APIHandler) getRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aH.writeJSON(w, r, &model.UserRole{UserId: id, GroupName: group.Name})
+	aH.WriteJSON(w, r, &model.UserRole{UserId: id, GroupName: group.Name})
 }
 
 func (aH *APIHandler) editRole(w http.ResponseWriter, r *http.Request) {
@@ -1394,7 +1394,7 @@ func (aH *APIHandler) editRole(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, apiErr, "Failed to add user to group")
 		return
 	}
-	aH.writeJSON(w, r, map[string]string{"data": "user group updated successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "user group updated successfully"})
 }
 
 func (aH *APIHandler) getOrgs(w http.ResponseWriter, r *http.Request) {
@@ -1403,7 +1403,7 @@ func (aH *APIHandler) getOrgs(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, apiErr, "Failed to fetch orgs from the DB")
 		return
 	}
-	aH.writeJSON(w, r, orgs)
+	aH.WriteJSON(w, r, orgs)
 }
 
 func (aH *APIHandler) getOrg(w http.ResponseWriter, r *http.Request) {
@@ -1413,7 +1413,7 @@ func (aH *APIHandler) getOrg(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, apiErr, "Failed to fetch org from the DB")
 		return
 	}
-	aH.writeJSON(w, r, org)
+	aH.WriteJSON(w, r, org)
 }
 
 func (aH *APIHandler) editOrg(w http.ResponseWriter, r *http.Request) {
@@ -1437,7 +1437,7 @@ func (aH *APIHandler) editOrg(w http.ResponseWriter, r *http.Request) {
 
 	telemetry.GetInstance().SendEvent(telemetry.TELEMETRY_EVENT_ORG_SETTINGS, data)
 
-	aH.writeJSON(w, r, map[string]string{"data": "org updated successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "org updated successfully"})
 }
 
 func (aH *APIHandler) getOrgUsers(w http.ResponseWriter, r *http.Request) {
@@ -1451,7 +1451,7 @@ func (aH *APIHandler) getOrgUsers(w http.ResponseWriter, r *http.Request) {
 	for i := range users {
 		users[i].Password = ""
 	}
-	aH.writeJSON(w, r, users)
+	aH.WriteJSON(w, r, users)
 }
 
 func (aH *APIHandler) getResetPasswordToken(w http.ResponseWriter, r *http.Request) {
@@ -1463,7 +1463,7 @@ func (aH *APIHandler) getResetPasswordToken(w http.ResponseWriter, r *http.Reque
 			Err: err}, "Failed to create reset token entry in the DB")
 		return
 	}
-	aH.writeJSON(w, r, resp)
+	aH.WriteJSON(w, r, resp)
 }
 
 func (aH *APIHandler) resetPassword(w http.ResponseWriter, r *http.Request) {
@@ -1479,7 +1479,7 @@ func (aH *APIHandler) resetPassword(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
-	aH.writeJSON(w, r, map[string]string{"data": "password reset successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "password reset successfully"})
 }
 
 func (aH *APIHandler) changePassword(w http.ResponseWriter, r *http.Request) {
@@ -1494,7 +1494,7 @@ func (aH *APIHandler) changePassword(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
-	aH.writeJSON(w, r, map[string]string{"data": "password changed successfully"})
+	aH.WriteJSON(w, r, map[string]string{"data": "password changed successfully"})
 }
 
 // func (aH *APIHandler) getApplicationPercentiles(w http.ResponseWriter, r *http.Request) {
@@ -1509,7 +1509,7 @@ func (aH *APIHandler) changePassword(w http.ResponseWriter, r *http.Request) {
 // 	if aH.handleError(w, err, http.StatusBadRequest) {
 // 		return
 // 	}
-// 	aH.writeJSON(w, r, result)
+// 	aH.WriteJSON(w, r, result)
 // }
 
 func (aH *APIHandler) handleError(w http.ResponseWriter, err error, statusCode int) bool {
@@ -1532,7 +1532,7 @@ func (aH *APIHandler) handleError(w http.ResponseWriter, err error, statusCode i
 	return true
 }
 
-func (aH *APIHandler) writeJSON(w http.ResponseWriter, r *http.Request, response interface{}) {
+func (aH *APIHandler) WriteJSON(w http.ResponseWriter, r *http.Request, response interface{}) {
 	marshall := json.Marshal
 	if prettyPrint := r.FormValue("pretty"); prettyPrint != "" && prettyPrint != "false" {
 		marshall = func(v interface{}) ([]byte, error) {

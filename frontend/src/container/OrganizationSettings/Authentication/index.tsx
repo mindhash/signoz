@@ -1,7 +1,7 @@
 import { LockOutlined } from '@ant-design/icons';
 import { Button, Typography } from 'antd';
-import React, { useState } from 'react';
 import UpgradeModal from 'components/Upgrade';
+import React, { useState } from 'react';
 
 import { TitleWrapper } from './styles';
 
