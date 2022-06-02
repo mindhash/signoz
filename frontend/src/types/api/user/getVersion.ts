@@ -1,4 +1,4 @@
 export interface PayloadProps {
 	version: string;
-	eeAvailable: "Y" | "N" | undefined;
+	eeAvailable: 'Y' | 'N' | undefined;
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/gorilla/mux"
 	baseApp "go.signoz.io/query-service/app"
+
 	eeDao "go.signoz.io/query-service/ee/dao"
 	license "go.signoz.io/query-service/ee/license"
 	"go.signoz.io/query-service/version"
@@ -23,27 +24,33 @@ func NewAPIHandler(reader EventReader, qsrepo eeDao.ModelDao, lm *license.Licens
 		return nil, err
 	}
 	ah := &APIHandler{
-		ch:         reader,
-		qsRepo:     qsrepo,
-		lm:         lm,
-		APIHandler: baseHandler,
+		ch:             reader,
+		qsRepo:         qsrepo,
+		licenseManager: lm,
+		APIHandler:     baseHandler,
 	}
 	return ah, nil
 }
 
 // RegisterRoutes registers routes for this handler on the given router
-func (aH *APIHandler) RegisterRoutes(router *mux.Router) {
-	aH.APIHandler.RegisterRoutes(router)
+func (ah *APIHandler) RegisterRoutes(router *mux.Router) {
+	// note: add ee override methods first
 
-	// ee specific routes
-	router.HandleFunc("/api/v1/organization/{org_id}/complete/saml", baseApp.OpenAccess(aH.ReceiveSAML)).Methods(http.MethodPost)
+	// routes available only in ee version
+	router.HandleFunc("/api/v1/apply/license", baseApp.AdminAccess(ah.applyLicense)).Methods(http.MethodPost)
+	router.HandleFunc("/api/v1/featureFlags", baseApp.OpenAccess(ah.getFeatureFlags)).Methods(http.MethodGet)
+
+	// paid plans specific routes
+	router.HandleFunc("/api/v1/organization/{org_id}/complete/saml", baseApp.OpenAccess(ah.ReceiveSAML)).Methods(http.MethodPost)
 
 	// base overrides
-	router.HandleFunc("/api/v1/version", baseApp.OpenAccess(aH.getVersion)).Methods(http.MethodGet)
+	router.HandleFunc("/api/v1/version", baseApp.OpenAccess(ah.getVersion)).Methods(http.MethodGet)
+
+	ah.APIHandler.RegisterRoutes(router)
 
 }
 
-func (aH *APIHandler) getVersion(w http.ResponseWriter, r *http.Request) {
+func (ah *APIHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 	version := version.GetVersion()
-	aH.WriteJSON(w, r, map[string]string{"version": version, "eeAvailable": "Y"})
+	ah.WriteJSON(w, r, map[string]string{"version": version, "eeAvailable": "Y"})
 }

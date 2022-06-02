@@ -1,40 +1,34 @@
-import { LockOutlined } from '@ant-design/icons';
-import { Button, Typography } from 'antd';
-import UpgradeModal from 'components/Upgrade';
-import React, { useState } from 'react';
+import { Typography } from 'antd';
+import LicenseModal from 'components/License';
+import { ModalType } from 'container/OrganizationSettings/types';
+import React from 'react';
 
+import SamlAuthSection from './config/saml';
 import { TitleWrapper } from './styles';
 
-function Authentication(): JSX.Element {
-	const [upgradeVisible, setUpgradeVisible] = useState<boolean>(true);
-
+function AuthSettings({ showModal, setShowModal }: Props): JSX.Element {
 	const renderMethod = (): JSX.Element => {
+		return <SamlAuthSection showModal={showModal} setShowModal={setShowModal} />;
+	};
+
+	const hideLicenseModal = (b: boolean): void => {
+		if (!b) {
+			setShowModal('');
+		}
+	};
+
+	const renderLicenseModal = (): JSX.Element => {
 		return (
-			<>
-				<Typography.Title level={5}>Google Apps authentication </Typography.Title>
-				<Typography.Paragraph>
-					Let your team sign in with a Google account.
-				</Typography.Paragraph>
-
-				<Button icon={<LockOutlined />} type="primary">
-					Upgrade to Configure
-				</Button>
-
-				<Typography.Title level={5} style={{ marginTop: '1rem' }}>
-					SAML authentication{' '}
-				</Typography.Title>
-				<Typography.Paragraph>
-					Setup Azure, Okta, OneLogin or your custom SAML 2.0 provider.
-				</Typography.Paragraph>
-				<Button icon={<LockOutlined />} type="primary">
-					Upgrade to Configure
-				</Button>
-			</>
+			<LicenseModal
+				visible={showModal === 'APPLY_LICENSE'}
+				setVisible={hideLicenseModal}
+			/>
 		);
 	};
+
 	return (
 		<>
-			<UpgradeModal visible={upgradeVisible} setVisible={setUpgradeVisible} />
+			{renderLicenseModal()}
 			<TitleWrapper>
 				<Typography.Title level={3}>Authentication</Typography.Title>
 			</TitleWrapper>
@@ -47,4 +41,9 @@ function Authentication(): JSX.Element {
 	);
 }
 
-export default Authentication;
+interface Props {
+	showModal: ModalType;
+	setShowModal: (m: ModalType) => void;
+}
+
+export default AuthSettings;

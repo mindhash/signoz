@@ -5,25 +5,28 @@ import (
 	"fmt"
 	"github.com/gorilla/mux"
 	authpkg "go.signoz.io/query-service/auth"
+	"go.signoz.io/query-service/constants"
 	"go.signoz.io/query-service/saml"
 	"go.uber.org/zap"
 	"net/http"
 )
 
-func (aH *APIHandler) ReceiveSAML(w http.ResponseWriter, r *http.Request) {
+// methods that use user authentication
+
+func (ah *APIHandler) ReceiveSAML(w http.ResponseWriter, r *http.Request) {
 	orgID := mux.Vars(r)["org_id"]
 	redirectUri := constants.GetSAMLRedirectURL()
 
 	// get org
-	org, apiError := aH.qsRepo.GetOrg(context.Background(), orgID)
+	org, apiError := ah.qsRepo.GetOrg(context.Background(), orgID)
 	if apiError != nil {
 		zap.S().Errorf("[ReceiveSAML] failed to fetch organization (%s): %v", orgID, apiError)
 		http.Redirect(w, r, fmt.Sprintf("%s?ssoerror=%s", redirectUri, "failed to identify user organization, please contact your administrator"), 301)
 		return
 	}
 
-	if ok := aH.licenseManager.CheckFeature(org.ID, Constants.FEATURES_SAML); !ok {
-		zap.S().Errorf("[ReceiveSAML] feature unavailable %s in org %s", constants.FEATURES_SAML, org.ID)
+	if ok := ah.licenseManager.CheckFeature(org.Id, constants.FEATURES_SAML); !ok {
+		zap.S().Errorf("[ReceiveSAML] feature unavailable %s in org %s", constants.FEATURES_SAML, org.Id)
 		http.Redirect(w, r, fmt.Sprintf("%s?ssoerror=%s", redirectUri, "feature unavailable, please upgrade your billing plan to access this feature"), 301)
 		return
 	}
@@ -64,7 +67,7 @@ func (aH *APIHandler) ReceiveSAML(w http.ResponseWriter, r *http.Request) {
 	firstName := assertionInfo.Values.Get("FirstName")
 	lastName := assertionInfo.Values.Get("LastName")
 
-	userPayload, err := aH.qsRepo.FetchOrRegisterSAMLUser(email, firstName, lastName)
+	userPayload, err := ah.qsRepo.FetchOrRegisterSAMLUser(email, firstName, lastName)
 	if err != nil {
 		zap.S().Errorf("[ReceiveSAML] failed to find or register a new user for email %s and org %s", email, org.Id)
 		http.Redirect(w, r, fmt.Sprintf("%s?ssoerror=%s", redirectUri, "failed to authenticate, please contact your administrator"), 301)

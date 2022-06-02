@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+
 	jwtmiddleware "github.com/auth0/go-jwt-middleware"
 	"github.com/golang-jwt/jwt"
 	"github.com/pkg/errors"
@@ -46,10 +47,12 @@ func validateUser(tok string) (*model.UserPayload, error) {
 	if !claims.VerifyExpiresAt(now, true) {
 		return nil, model.ErrorTokenExpired
 	}
+
 	return &model.UserPayload{
 		User: model.User{
 			Id:      claims["id"].(string),
 			GroupId: claims["gid"].(string),
+			OrgId:   claims["orgId"].(string),
 			Email:   claims["email"].(string),
 		},
 	}, nil
@@ -109,6 +112,7 @@ func GenerateJWTForUser(user *model.User) (UserJwtToken, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    user.Id,
 		"gid":   user.GroupId,
+		"orgId": user.OrgId,
 		"email": user.Email,
 		"exp":   t.AccessExpiry,
 	})
@@ -123,6 +127,7 @@ func GenerateJWTForUser(user *model.User) (UserJwtToken, error) {
 		"id":    user.Id,
 		"gid":   user.GroupId,
 		"email": user.Email,
+		"orgId": user.OrgId,
 		"exp":   t.RefreshExpiry,
 	})
 

@@ -8,10 +8,12 @@ import (
 	"go.signoz.io/query-service/app/dashboards"
 	"go.signoz.io/query-service/constants"
 
-	db "go.signoz.io/query-service/ee/app/db"
-	"go.signoz.io/query-service/ee/dao"
 	"go.signoz.io/query-service/healthcheck"
 	"go.signoz.io/query-service/utils"
+
+	db "go.signoz.io/query-service/ee/app/db"
+	"go.signoz.io/query-service/ee/dao"
+	licensepkg "go.signoz.io/query-service/ee/license"
 
 	"go.uber.org/zap"
 	"net"
@@ -76,7 +78,7 @@ func (s *Server) createHTTPServer(repo dao.ModelDao) (*http.Server, error) {
 		return nil, fmt.Errorf("Storage type: %s is not supported in query service", storage)
 	}
 
-	lm, err := license.NewLicenseManager(localDB)
+	lm, err := licensepkg.NewLicenseManager(localDB)
 	if err != nil {
 		return nil, err
 	}

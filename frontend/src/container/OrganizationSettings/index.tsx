@@ -1,18 +1,32 @@
 import { Divider, Space } from 'antd';
-import useEEAvailable from 'hooks/useEEAvailable';
-import React from 'react';
+import getUserVersion from 'api/user/getVersion';
+import React, { useState } from 'react';
+import { useQueries } from 'react-query';
 import { useSelector } from 'react-redux';
 import { AppState } from 'store/reducers';
 import AppReducer from 'types/reducer/app';
 
+import { MODAL_TYPE } from './types';
 import Authentication from './Authentication';
 import DisplayName from './DisplayName';
 import Members from './Members';
 import PendingInvitesContainer from './PendingInvitesContainer';
 
 function OrganizationSettings(): JSX.Element {
-	const ee = useEEAvailable();
-	const { org } = useSelector<AppState, AppReducer>((state) => state.app);
+	// a page level modal state manager to make sure only
+	// one modal is displayed at time
+	const [showModal, setShowModal] = useState<MODAL_TYPE>('');
+	const { org, isLoggedIn } = useSelector<AppState, AppReducer>(
+		(state) => state.app,
+	);
+
+	const [versionResponse] = useQueries([
+		{
+			queryFn: getUserVersion,
+			queryKey: 'getEEAvailable',
+			enabled: isLoggedIn,
+		},
+	]);
 
 	if (!org) {
 		return <div />;
@@ -31,9 +45,9 @@ function OrganizationSettings(): JSX.Element {
 				))}
 			</Space>
 			<Divider />
-			{ee && (
+			{versionResponse && versionResponse.data?.payload?.eeAvailable && (
 				<>
-					<Authentication />
+					<Authentication showModal={showModal} setshowModal={showModal} />
 					<Divider />
 				</>
 			)}
