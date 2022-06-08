@@ -5,7 +5,7 @@ import Spinner from 'components/Spinner';
 import { useQueries } from 'react-query';
 
 import getFeatureFlags from 'api/user/getFeatureFlags';
-import { ModalType } from 'container/OrganizationSettings/types';
+import { ModalType, SAMLConfig } from 'container/OrganizationSettings/types';
 
 // SamlAuthConfig displays SAML section and allows editing of parameters
 // through SamlParamsForm. If user is not in a paid plan, an option
@@ -14,6 +14,9 @@ function SamlAuthSection({
 	showModal,
 	setShowModal,
 }: SamlSectionProps): JSX.Element {
+	// get or set saml params 
+	// SAMLParams
+	// add a refresh button to bring back the exisitng params ?
 	const [getFeatures] = useQueries([
 		{
 			queryFn: getFeatureFlags,
@@ -29,8 +32,6 @@ function SamlAuthSection({
 
 		if (getFeatures.isSuccess && getFeatures.data?.statusCode === 200) {
 			const { features } = getFeatures.data.payload;
-			console.log('features:', features);
-			console.log('payload:', getFeatures.data.payload);
 			if (features && features.SAML) {
 				return (
 					<Button
@@ -65,6 +66,7 @@ function SamlAuthSection({
 
 	return (
 		<>
+			{showModal? <SamlParamsForm />}
 			<Typography.Title level={5} style={{ marginTop: '1rem' }}>
 				SAML authentication{' '}
 			</Typography.Title>
@@ -86,4 +88,16 @@ export default SamlAuthSection;
 // SamlConfigForm allows editing of SAML parameters. The content
 // is displayed in a modal window. User can only edit parameters
 // for the org she is associated with.
-function SamlParamsForm(): JSX.Element {}
+function SamlParamsForm(
+{	setParams,
+	saveParams,
+	hideForm,
+}: SamlParamsFormProps 
+): JSX.Element {}
+
+
+interface SamlParamsFormProps {
+	setParams: (p: SAMLParams) => void,
+	saveParams: (p: SAMLParams) => void,
+	hideForm: () => void,
+}
