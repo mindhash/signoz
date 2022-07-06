@@ -6,11 +6,14 @@ import (
 	"net"
 	"net/http"
 	_ "net/http/pprof" // http profiler
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/rs/cors"
 	"github.com/soheilhy/cmux"
@@ -19,13 +22,17 @@ import (
 	"go.signoz.io/query-service/constants"
 	"go.signoz.io/query-service/dao"
 	"go.signoz.io/query-service/healthcheck"
+	am "go.signoz.io/query-service/integrations/alertManager"
 	"go.signoz.io/query-service/interfaces"
+	pqle "go.signoz.io/query-service/pqlEngine"
+	"go.signoz.io/query-service/rules"
 	"go.signoz.io/query-service/telemetry"
 	"go.signoz.io/query-service/utils"
 	"go.uber.org/zap"
 )
 
 type ServerOptions struct {
+	PromConfigPath  string
 	HTTPHostPort    string
 	PrivateHostPort string
 }
@@ -35,6 +42,9 @@ type Server struct {
 	// logger       *zap.Logger
 	// tracer opentracing.Tracer // TODO make part of flags.Service
 	serverOptions *ServerOptions
+	conn          net.Listener
+	ruleManager   *rules.Manager
+	separatePorts bool
 
 	// public http router
 	httpConn   net.Listener
@@ -58,6 +68,7 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 	if err := dao.InitDao("sqlite", constants.RELATIONAL_DATASOURCE_PATH); err != nil {
 		return nil, err
 	}
+
 	localDB, err := dashboards.InitDB(constants.RELATIONAL_DATASOURCE_PATH)
 
 	if err != nil {
@@ -70,16 +81,26 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 	storage := os.Getenv("STORAGE")
 	if storage == "clickhouse" {
 		zap.S().Info("Using ClickHouse as datastore ...")
-		clickhouseReader := clickhouseReader.NewReader(localDB)
+		clickhouseReader := clickhouseReader.NewReader(localDB, serverOptions.PromConfigPath)
 		go clickhouseReader.Start()
 		reader = clickhouseReader
 	} else {
 		return nil, fmt.Errorf("Storage type: %s is not supported in query service", storage)
 	}
 
-	telemetry.GetInstance().SetReader(reader)
+	externalURL, err := computeExternalURL("", "0.0.0.0:3301")
+	if err != nil {
+		zap.S().Errorf("failed to parse external url:", externalURL.String())
+		externalURL, _ = url.Parse("http://signoz.io")
+	}
 
-	apiHandler, err := NewAPIHandler(&reader, dao.DB())
+	rm, err := makeRulesManager(serverOptions.PromConfigPath, constants.GetAlertManagerApiPrefix(), externalURL, localDB, reader)
+	if err != nil {
+		return nil, err
+	}
+
+	telemetry.GetInstance().SetReader(reader)
+	apiHandler, err := NewAPIHandler(&reader, dao.DB(), rm)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +108,7 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 	s := &Server{
 		// logger: logger,
 		// tracer: tracer,
+		ruleManager:        rm,
 		serverOptions:      serverOptions,
 		unavailableChannel: make(chan healthcheck.Status),
 	}
@@ -107,6 +129,44 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 	s.privateHTTP = privateServer
 
 	return s, nil
+}
+
+// computeExternalURL computes a sanitized external URL from a raw input. It infers unset
+// URL parts from the OS and the given listen address.
+func computeExternalURL(u, listenAddr string) (*url.URL, error) {
+	if u == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return nil, err
+		}
+		_, port, err := net.SplitHostPort(listenAddr)
+		if err != nil {
+			return nil, err
+		}
+		u = fmt.Sprintf("http://%s:%s/", hostname, port)
+	}
+
+	startsOrEndsWithQuote := func(s string) bool {
+		return strings.HasPrefix(s, "\"") || strings.HasPrefix(s, "'") ||
+			strings.HasSuffix(s, "\"") || strings.HasSuffix(s, "'")
+	}
+
+	if startsOrEndsWithQuote(u) {
+		return nil, fmt.Errorf("URL must not begin or end with quotes")
+	}
+
+	eu, err := url.Parse(u)
+	if err != nil {
+		return nil, err
+	}
+
+	ppref := strings.TrimRight(eu.Path, "/")
+	if ppref != "" && !strings.HasPrefix(ppref, "/") {
+		ppref = "/" + ppref
+	}
+	eu.Path = ppref
+
+	return eu, nil
 }
 
 func (s *Server) createPrivateServer(api *APIHandler) (*http.Server, error) {
@@ -262,6 +322,9 @@ func (s *Server) initListeners() error {
 // Start listening on http and private http port concurrently
 func (s *Server) Start() error {
 
+	// initiate rule manager first
+	s.ruleManager.Start()
+
 	err := s.initListeners()
 	if err != nil {
 		return err
@@ -314,4 +377,48 @@ func (s *Server) Start() error {
 	}()
 
 	return nil
+}
+
+func makeRulesManager(
+	promConfigPath,
+	alertManagerURL string,
+	externalURL *url.URL,
+	db *sqlx.DB,
+	ch interfaces.Reader) (*rules.Manager, error) {
+
+	// create engine
+	pqle, err := pqle.FromConfigPath(promConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pql engine : %v", err)
+	}
+
+	// notifier opts
+	notifierOpts := am.NotifierOptions{
+		QueueCapacity:    10000,
+		Timeout:          1 * time.Second,
+		AlertManagerURLs: []string{alertManagerURL},
+	}
+
+	// create manager opts
+	managerOpts := &rules.ManagerOptions{
+		NotifierOpts: notifierOpts,
+		Queriers: &rules.Queriers{
+			PqlEngine: pqle,
+			Ch:        ch.GetConn(),
+		},
+		ExternalURL: externalURL,
+		Conn:        db,
+		Context:     context.Background(),
+		Logger:      nil,
+	}
+
+	// create Manager
+	manager, err := rules.NewManager(managerOpts)
+	if err != nil {
+		return nil, fmt.Errorf("rule manager error: %v", err)
+	}
+
+	zap.S().Info("rules manager is ready")
+
+	return manager, nil
 }

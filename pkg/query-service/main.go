@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,6 +26,9 @@ func initZapLog() *zap.Logger {
 }
 
 func main() {
+	var promConfigPath string
+	flag.StringVar(&promConfigPath, "config", "./config/prometheus.yml", "(prometheus config to read metrics)")
+	flag.Parse()
 
 	loggerMgr := initZapLog()
 	zap.ReplaceGlobals(loggerMgr)
@@ -35,6 +39,7 @@ func main() {
 
 	serverOptions := &app.ServerOptions{
 		HTTPHostPort:    constants.HTTPHostPort,
+		PromConfigPath:  promConfigPath,
 		PrivateHostPort: constants.PrivateHostPort,
 	}
 
