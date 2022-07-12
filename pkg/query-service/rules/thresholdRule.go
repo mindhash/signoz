@@ -294,6 +294,9 @@ func (r *ThresholdRule) SendAlerts(ctx context.Context, ts time.Time, resendDela
 }
 func (r *ThresholdRule) CheckCondition(v float64) bool {
 
+	zap.S().Debugf("value: ", v, "target:", r.ruleCondition.Target)
+	zap.S().Debugf("op: ", r.ruleCondition.CompareOp)
+
 	if value.IsNaN(v) {
 		zap.S().Debugf("msg:", "found NaN in rule condition", "\t rule name:", r.Name())
 		return false
@@ -431,6 +434,7 @@ func (r *ThresholdRule) runChQuery(ctx context.Context, db clickhouse.Conn, quer
 
 		labelHash := lbls.Labels().Hash()
 
+		zap.S().Debugf("preparing results for rule match type:", r.matchType())
 		// here we walk through values of time series
 		// and calculate the final value used to compare
 		// with rule target
