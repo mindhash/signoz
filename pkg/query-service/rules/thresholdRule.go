@@ -434,7 +434,6 @@ func (r *ThresholdRule) runChQuery(ctx context.Context, db clickhouse.Conn, quer
 
 		labelHash := lbls.Labels().Hash()
 
-		zap.S().Debugf("preparing results for rule match type:", r.matchType())
 		// here we walk through values of time series
 		// and calculate the final value used to compare
 		// with rule target
