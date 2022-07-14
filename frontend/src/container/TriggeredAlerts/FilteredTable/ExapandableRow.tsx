@@ -1,6 +1,8 @@
 import { Tag, Typography } from 'antd';
+import ROUTES from 'constants/routes';
 import convertDateToAmAndPm from 'lib/convertDateToAmAndPm';
 import getFormattedDate from 'lib/getFormatedDate';
+import history from 'lib/history';
 import React from 'react';
 import { Alerts } from 'types/api/alerts/getAll';
 
@@ -8,6 +10,10 @@ import Status from '../TableComponents/AlertStatus';
 import { TableCell, TableRow } from './styles';
 
 function ExapandableRow({ allAlerts }: ExapandableRowProps): JSX.Element {
+	const onAlertClickHandler = (id: string): void => {
+		history.push(`${ROUTES.EDIT_ALERTS}?ruleId=${id}`);
+	};
+
 	return (
 		<>
 			{allAlerts.map((alert) => {
@@ -33,7 +39,15 @@ function ExapandableRow({ allAlerts }: ExapandableRowProps): JSX.Element {
 						</TableCell>
 
 						<TableCell>
-							<Typography>{labels.alertname}</Typography>
+							{'ruleId' in labels && labels.ruleId ? (
+								<Typography.Link
+									onClick={(): void => onAlertClickHandler(labels.ruleId)}
+								>
+									{labels.alertname}
+								</Typography.Link>
+							) : (
+								<Typography>{labels.alertname}</Typography>
+							)}
 						</TableCell>
 
 						<TableCell>
