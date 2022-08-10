@@ -8,6 +8,18 @@ type Organization struct {
 	HasOptedUpdates bool   `json:"hasOptedUpdates" db:"has_opted_updates"`
 }
 
+func (o *Organization) IsLDAPAvailable() bool {
+	if !o.IsSSOEnabled() {
+		return false
+	}
+
+	return true
+}
+
+func (o *Organization) GetLDAPConfig() LDAPConfig {
+	return LDAPConfig{}
+}
+
 func (o *Organization) GetSAMLEntityID() string {
 	return "urn:example:idp"
 }
