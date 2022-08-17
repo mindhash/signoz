@@ -1,15 +1,23 @@
 package constants
 
-type SupportedFeatures map[string]bool
+import (
+  "signo.io/query-service/model"
+)
 
-var BasicPlan = SupportedFeatures{}
+const SSO FeatureKey = "SSO"
+const SAML FeatureKey = "SAML"
 
-var ProPlan = SupportedFeatures{
-	"SAML": false,
+var BasicPlan = PlanFeatures{
+  SSO:  false,
+  SAML: false,
 }
 
-var EnterprisePlan = SupportedFeatures{
-	"SAML": true,
+var ProPlan = PlanFeatures{
+  SSO:  true,
+  SAML: true,
 }
 
-const FEATURES_SAML = "SAML"
+var EnterprisePlan = PlanFeatures{
+  SSO:  true,
+  SAML: true,
+}

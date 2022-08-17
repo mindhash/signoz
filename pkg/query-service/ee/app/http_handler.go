@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/gorilla/mux"
 	baseApp "go.signoz.io/query-service/app"
+	baseInt "go.signoz.io/query-service/interfaces"
 
 	eeDao "go.signoz.io/query-service/ee/dao"
 	license "go.signoz.io/query-service/ee/license"
@@ -10,15 +11,22 @@ import (
 	"net/http"
 )
 
+type Options struct {
+	ch     EventReader
+	qsRepo eeDao.ModelDao
+
+	featureFlags baseInt.FeatureStore
+
+	licenseManager license.Manager
+}
+
 type APIHandler struct {
-	ch             EventReader
-	qsRepo         eeDao.ModelDao
-	licenseManager *license.LicenseManager
+	opts Options
 	*baseApp.APIHandler
 }
 
 // NewAPIHandler returns an APIHandler
-func NewAPIHandler(reader EventReader, qsrepo eeDao.ModelDao, lm *license.LicenseManager) (*APIHandler, error) {
+func NewAPIHandler(opts Options) (*APIHandler, error) {
 	baseHandler, err := baseApp.NewAPIHandler(reader, qsrepo, "../config/dashboards")
 	if err != nil {
 		return nil, err

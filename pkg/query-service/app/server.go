@@ -18,6 +18,7 @@ import (
 	"go.signoz.io/query-service/constants"
 	"go.signoz.io/query-service/dao"
 	"go.signoz.io/query-service/healthcheck"
+	"go.signoz.io/query-service/interfaces"
 	"go.signoz.io/query-service/telemetry"
 	"go.signoz.io/query-service/utils"
 	"go.uber.org/zap"
@@ -26,6 +27,7 @@ import (
 type ServerOptions struct {
 	HTTPHostPort string
 	// DruidClientUrl string
+	featureStore interfaces.FeatureStore
 }
 
 // Server runs HTTP, Mux and a grpc server
@@ -37,6 +39,10 @@ type Server struct {
 	// tracer opentracing.Tracer // TODO make part of flags.Service
 	serverOptions *ServerOptions
 	conn          net.Listener
+
+	// feature flags
+	featureStore interfaces.FeatureStore
+
 	// grpcConn           net.Listener
 	httpConn net.Listener
 	// grpcServer         *grpc.Server

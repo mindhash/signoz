@@ -14,6 +14,7 @@ import (
 	db "go.signoz.io/query-service/ee/app/db"
 	"go.signoz.io/query-service/ee/dao"
 	licensepkg "go.signoz.io/query-service/ee/license"
+	baseInt "go.signoz.io/query-service/interfaces"
 
 	"go.uber.org/zap"
 	"net"
@@ -23,6 +24,9 @@ import (
 
 type ServerOptions struct {
 	HTTPHostPort string
+
+	// feature flags
+	featureStore baseInt.FeatureStore
 }
 
 type Server struct {
@@ -31,6 +35,9 @@ type Server struct {
 	httpConn           net.Listener
 	httpServer         *http.Server
 	unavailableChannel chan healthcheck.Status
+
+	// feature flags
+	featureStore baseInt.FeatureStore
 }
 
 // HealthCheckStatus returns health check status channel a client can subscribe to
