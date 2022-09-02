@@ -4,28 +4,27 @@ import (
 	"context"
 	"fmt"
 	"github.com/jmoiron/sqlx"
-	"go.signoz.io/query-service/constants"
+	eeModel "go.signoz.io/query-service/ee/model"
 	"go.signoz.io/query-service/model"
 	"sync"
 )
+
+type Manager interface {
+	AddLicense(key string, org *model.Organization) (*eeModel.License, *model.ApiError)
+	GetLicenses(org *model.Organization) ([]eeModel.License, *model.ApiError)
+}
 
 type LicenseManager struct {
 	repo  *Repo
 	mutex sync.Mutex
 
-	// license cache
-	licenseCache map[string]*License
-
 	// cache of features by org id
 	// load happens on first time accesss
 	// refreshes when billing plan changes (e.g. upgrade to pro)
-	featureCache map[string]constants.SupportedFeatures
-
-	// subscribers get a message when a new license key is added
-	subscribers []func(*License) error
+	featureCache map[string]model.PlanFeatures
 }
 
-func NewLicenseManager(db *sqlx.DB) (*LicenseManager, error) {
+func NewManager(db *sqlx.DB) (*LicenseManager, error) {
 	// fetch the latest license from db
 	repo := NewLicenseRepo(db)
 	err := repo.InitDB("sqlite3")
@@ -37,11 +36,26 @@ func NewLicenseManager(db *sqlx.DB) (*LicenseManager, error) {
 		repo: &repo,
 	}
 
-	if err := m.LoadLicenses(); err != nil {
-		return nil, fmt.Errorf("failed to load licenses from db: %v", err)
+	if err := m.init(); err != nil {
+		return m, err
 	}
 
 	return m, nil
+}
+
+func (lm *LicenseManager) init() error {
+	if err := lm.LoadLicenses(); err != nil {
+		return fmt.Errorf("failed to load licenses from db: %v", err)
+	}
+	return nil
+}
+
+func (lm *LicenseManager) CheckFeature(org *model.Organization, f model.FeatureKey) error {
+	return nil
+}
+
+func (lm *LicenseManager) GetLicenses(org *model.Organization) ([]License, *model.ApiError) {
+	return nil, nil
 }
 
 func (lm *LicenseManager) LoadLicenses() error {
@@ -50,41 +64,50 @@ func (lm *LicenseManager) LoadLicenses() error {
 	if err != nil {
 		return err
 	}
-	lmap := make(map[string]*License, 0)
-	fmap := make(map[string]constants.SupportedFeatures, 0)
+	fmap := make(map[string]model.PlanFeatures, 0)
 	for _, l := range activeLicenses {
 
+		// call a go-routine to ping license to signoz server
+
 		// load features for the license
-		features, err := l.LoadFeatures()
+		features, err := l.ParseFeatures()
 		if err != nil {
 			return fmt.Errorf("failed to load features for the given license: %v", err)
 		}
 
 		// todo(amol): pick from repeated licenses ones
-		lmap[l.OrgId] = &l
+		// todo(amol): do we append all the features for multiple active license?
 		fmap[l.OrgId] = features
-
 	}
 
 	lm.mutex.Lock()
 	defer lm.mutex.Unlock()
-	lm.licenseCache = lmap
 	lm.featureCache = fmap
+
 	return nil
 }
 
-func (lm *LicenseManager) ApplyLicense(key string, org *model.Organization) (err error) {
+func (lm *LicenseManager) AddLicense(key string, org *model.Organization) *model.ApiError {
 	ctx := context.Background()
 	if org == nil {
-		return fmt.Errorf("org is required when adding a license key")
+		return &model.ApiError{
+			Typ: model.ErrorBadData,
+			Err: fmt.Errorf("org is required when adding a license key"),
+		}
 	}
 
-	// todo(amol): validate and extract license key using  public signature
+	// call license.signoz.io to activate license
+
+	// parse the response into license
+	license := eeModel.License{Key: key}
 
 	// inserts a new license key in db
-	l, tx, err := lm.repo.InsertLicenseTx(ctx, key, org)
+	l, err := lm.repo.InsertLicense(ctx, &license, org)
 	if err != nil {
-		return err
+		return &model.ApiError{
+			Typ: model.ErrorInternal,
+			Err: err,
+		}
 	}
 	defer func() {
 		if err != nil {
@@ -95,39 +118,33 @@ func (lm *LicenseManager) ApplyLicense(key string, org *model.Organization) (err
 
 	}()
 
-	// extract supported features from encrypted license key
-	features, err := l.LoadFeatures()
+	// extract plan features from license
+	features, err := l.ParseFeatures()
 	if err != nil {
-		return fmt.Errorf("failed to load features for the given license: %v", err)
+		return &model.ApiError{
+			Typ: model.ErrorInternal,
+			Err: fmt.Errorf("failed to load features for the given license: %v", err),
+		}
 	}
 
 	// update cache
 	lm.mutex.Lock()
 	defer lm.mutex.Unlock()
-	lm.licenseCache[org.Id] = l
 	lm.featureCache[org.Id] = features
 
 	return nil
 }
 
 // GetFeatureFlags returns feature flags for a given org license
-func (lm *LicenseManager) GetFeatureFlags(orgId string) (constants.SupportedFeatures, error) {
-	fmt.Println("licenseCache:", lm.licenseCache)
-	fmt.Println("feature cache:", lm.featureCache)
-	if l, ok := lm.licenseCache[orgId]; ok {
-		fmt.Println("license found:", l)
-		// todo(amol): validate license is within dates
+func (lm *LicenseManager) GetFeatureFlags(orgId string) (model.PlanFeatures, error) {
 
-		if features, ok := lm.featureCache[orgId]; !ok {
-
-			return l.LoadFeatures()
-		} else {
-			fmt.Println("features found:", features)
-			return features, nil
-		}
+	if features, ok := lm.featureCache[orgId]; !ok {
+		return model.BasicPlan, nil
+	} else {
+		return features, nil
 	}
 
-	return constants.BasicPlan, nil
+	return model.BasicPlan, nil
 }
 
 // CheckFeature returns true when feature is available to the
@@ -150,24 +167,4 @@ func (lm *LicenseManager) CheckFeature(orgId string, s string) bool {
 	// we load each license into the cache when server starts or when
 	// license is added
 	return false
-}
-
-// Subscribe sends a signal when license plan changes
-func (lm *LicenseManager) Subscribe(ss ...func(*License) error) {
-	lm.mutex.Lock()
-	defer lm.mutex.Unlock()
-
-	lm.subscribers = append(lm.subscribers, ss...)
-}
-
-// notifySubscribers will be used to notify subscribers when
-// license config changes
-func (lm *LicenseManager) notifySubscribers(l *License) error {
-	for _, s := range lm.subscribers {
-		if err := s(l); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

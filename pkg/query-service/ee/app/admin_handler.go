@@ -48,7 +48,7 @@ func (ah *APIHandler) applyLicense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = ah.licenseManager.ApplyLicense(l.Key, org)
+	err = ah.licenseManager.AddLicense(l.Key, org)
 	if err != nil {
 		baseApp.RespondError(w, &model.ApiError{
 			Typ: model.ErrorInternal,

@@ -11,10 +11,10 @@ import (
 	"github.com/gorilla/mux"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/prometheus/prometheus/promql"
+	"go.signoz.io/query-scorservice/constants"
 	"go.signoz.io/query-service/app/dashboards"
 	"go.signoz.io/query-service/app/parser"
 	"go.signoz.io/query-service/auth"
-	"go.signoz.io/query-service/constants"
 	"go.signoz.io/query-service/dao"
 	am "go.signoz.io/query-service/integrations/alertManager"
 	"go.signoz.io/query-service/model"
@@ -184,7 +184,6 @@ func (aH *APIHandler) RegisterRoutes(router *mux.Router) {
 
 	router.HandleFunc("/api/v1/register", OpenAccess(aH.registerUser)).Methods(http.MethodPost)
 	router.HandleFunc("/api/v1/login", OpenAccess(aH.loginUser)).Methods(http.MethodPost)
-	router.HandleFunc("/api/v1/loginPrecheck", OpenAccess(aH.precheckLogin)).Methods(http.MethodGet)
 
 	router.HandleFunc("/api/v1/user", AdminAccess(aH.listUsers)).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/user/{id}", SelfAccess(aH.getUser)).Methods(http.MethodGet)
@@ -1098,56 +1097,6 @@ func (aH *APIHandler) listPendingInvites(w http.ResponseWriter, r *http.Request)
 		})
 	}
 	aH.WriteJSON(w, r, resp)
-}
-
-// precheckLogin checks if SSO or SAML is available, the check happens
-// when user enters email address in login screen.
-func (aH *APIHandler) precheckLogin(w http.ResponseWriter, r *http.Request) {
-
-	// todo(amol): validate email with org domain
-	// email := r.URL.Query().Get("email")
-
-	path := r.URL.Query().Get("path")
-
-	type precheckLoginResponse struct {
-		SSOEnabled   bool   `json:"ssoEnabled"`
-		SAMLEnabled  bool   `json:"samlEnabled"`
-		SAMLLoginUrl string `json:"samlLoginUrl"`
-	}
-
-	var org *model.Organization
-	var apiError *model.ApiError
-
-	if !aH.IsMultiOrgAvailable {
-		org, apiError = aH.relationalDB.GetSingleOrg(context.Background())
-		if apiError != nil {
-			zap.S().Debugf("[precheckLogin] failed to fetch organization: %v", apiError)
-			RespondError(w, apiError, nil)
-			return
-		}
-	} else {
-		// todo(amol): read email address from request and determine org using domain
-	}
-
-	// todo(amol) just responding dummy data for now
-	precheckResp := precheckLoginResponse{
-		SSOEnabled:  org.IsSSOEnabled(),
-		SAMLEnabled: org.IsSAMLEnabled(),
-	}
-
-	if org.IsSAMLAvailable() {
-		loginURL, err := saml.BuildLoginURLWithOrg(org, path)
-		if err != nil {
-			RespondError(w, &model.ApiError{
-				Typ: model.ErrorInternal,
-				Err: err,
-			}, nil)
-			return
-		}
-		precheckResp.SAMLLoginUrl = loginURL
-	}
-
-	aH.WriteJSON(w, r, precheckResp)
 }
 
 func (aH *APIHandler) registerUser(w http.ResponseWriter, r *http.Request) {

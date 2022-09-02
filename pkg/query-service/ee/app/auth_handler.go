@@ -12,8 +12,58 @@ import (
 )
 
 // methods that use user authentication
+// precheckLogin checks if SSO or SAML is available, the check happens
+// when user enters email address in login screen.
+func (aH *APIHandler) precheckLogin(w http.ResponseWriter, r *http.Request) {
+
+	// todo(amol): validate email with org domain
+	// email := r.URL.Query().Get("email")
+
+	path := r.URL.Query().Get("path")
+
+	type precheckLoginResponse struct {
+		SSOEnabled   bool   `json:"ssoEnabled"`
+		SAMLEnabled  bool   `json:"samlEnabled"`
+		SAMLLoginUrl string `json:"samlLoginUrl"`
+	}
+
+	var org *model.Organization
+	var apiError *model.ApiError
+
+	if !aH.IsMultiOrgAvailable {
+		org, apiError = aH.relationalDB.GetSingleOrg(context.Background())
+		if apiError != nil {
+			zap.S().Debugf("[precheckLogin] failed to fetch organization: %v", apiError)
+			RespondError(w, apiError, nil)
+			return
+		}
+	} else {
+		// todo(amol): read email address from request and determine org using domain
+	}
+
+	// todo(amol) just responding dummy data for now
+	precheckResp := precheckLoginResponse{
+		SSOEnabled:  org.IsSSOEnabled(),
+		SAMLEnabled: org.IsSAMLEnabled(),
+	}
+
+	if org.IsSAMLAvailable() {
+		loginURL, err := saml.BuildLoginURLWithOrg(org, path)
+		if err != nil {
+			RespondError(w, &model.ApiError{
+				Typ: model.ErrorInternal,
+				Err: err,
+			}, nil)
+			return
+		}
+		precheckResp.SAMLLoginUrl = loginURL
+	}
+
+	aH.WriteJSON(w, r, precheckResp)
+}
 
 func (ah *APIHandler) ReceiveSAML(w http.ResponseWriter, r *http.Request) {
+
 	orgID := mux.Vars(r)["org_id"]
 	redirectUri := constants.GetSAMLRedirectURL()
 
@@ -25,7 +75,7 @@ func (ah *APIHandler) ReceiveSAML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ok := ah.licenseManager.CheckFeature(org.Id, constants.FEATURES_SAML); !ok {
+	if ok := ah.CheckFeature(org.Id, constants.FEATURES_SAML); !ok {
 		zap.S().Errorf("[ReceiveSAML] feature unavailable %s in org %s", constants.FEATURES_SAML, org.Id)
 		http.Redirect(w, r, fmt.Sprintf("%s?ssoerror=%s", redirectUri, "feature unavailable, please upgrade your billing plan to access this feature"), 301)
 		return

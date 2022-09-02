@@ -50,7 +50,7 @@ func (r *Repo) GetActiveLicenses(ctx context.Context) ([]License, error) {
 }
 
 // CreateDashboard creates a new dashboard
-func (r *Repo) InsertLicenseTx(ctx context.Context, key string, org *model.Organization) (*License, *sqlx.Tx, error) {
+func (r *Repo) InsertLicenseTx(ctx context.Context, key string, org *model.Organization) (*License, error) {
 	if key == "" {
 		return nil, nil, fmt.Errorf("insert license failed: license key is required")
 	}

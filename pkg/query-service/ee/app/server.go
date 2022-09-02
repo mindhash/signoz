@@ -50,7 +50,6 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("db:", modelDao.DB())
 
 	s := &Server{
 		serverOptions:      serverOptions,
@@ -85,12 +84,19 @@ func (s *Server) createHTTPServer(repo dao.ModelDao) (*http.Server, error) {
 		return nil, fmt.Errorf("Storage type: %s is not supported in query service", storage)
 	}
 
-	lm, err := licensepkg.NewLicenseManager(localDB)
+	lm, err := licensepkg.NewManager(localDB)
 	if err != nil {
 		return nil, err
 	}
 
-	apiHandler, err := NewAPIHandler(ch, repo, lm)
+	apiOpts := APIHandlerOptions{
+		DataReader:     ch,
+		ModelDao:       repo,
+		FeatureFlags:   lm,
+		LicenseManager: lm,
+	}
+
+	apiHandler, err := NewAPIHandler(apiOpts)
 	if err != nil {
 		return nil, err
 	}
