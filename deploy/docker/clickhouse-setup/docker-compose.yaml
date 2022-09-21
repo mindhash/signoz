@@ -28,9 +28,9 @@ services:
     image: signoz/alertmanager:0.23.0-0.2
     volumes:
       - ./data/alertmanager:/data
-    depends_on:
-      query-service:
-        condition: service_healthy
+    # depends_on:
+    #   query-service:
+    #   condition: service_healthy
     restart: on-failure
     command:
       - --queryService.url=http://query-service:8085
@@ -39,16 +39,16 @@ services:
 # Notes for Maintainers/Contributors who will change Line Numbers of Frontend & Query-Section. Please Update Line Numbers in `./scripts/commentLinesForSetup.sh` & `./CONTRIBUTING.md`
 
   query-service:
-    image: signoz/query-service:0.11.0
+    image: signoz/query-service:custom
     container_name: query-service
     command: ["-config=/root/config/prometheus.yml"]
-    # ports:
-    #   - "6060:6060"     # pprof port
-    #   - "8080:8080"     # query-service port
+    ports:
+       - "6060:6060"     # pprof port
+       - "8080:8080"     # query-service port
     volumes:
       - ./prometheus.yml:/root/config/prometheus.yml
       - ../dashboards:/root/config/dashboards
-      - ./data/signoz/:/var/lib/signoz/
+      - ./data/signoz:/var/lib/signoz/
     environment:
       - ClickHouseUrl=tcp://clickhouse:9000/?database=signoz_traces
       - ALERTMANAGER_API_PREFIX=http://alertmanager:9093/api/
@@ -68,7 +68,7 @@ services:
         condition: service_healthy
 
   frontend:
-    image: signoz/frontend:0.11.0
+    image: signoz/frontend:custom
     container_name: frontend
     restart: on-failure
     depends_on:
