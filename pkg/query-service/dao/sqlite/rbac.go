@@ -91,7 +91,7 @@ func (mds *ModelDaoSqlite) CreateOrg(ctx context.Context,
 	org.Id = uuid.NewString()
 	org.CreatedAt = time.Now().Unix()
 	_, err := mds.db.ExecContext(ctx,
-		`INSERT INTO organizations (id, name, created_at) VALUES (?, ?, ?);`,
+		`INSERT INTO organizations (id, name, created_at) VALUES (?, ?, ?, ?);`,
 		org.Id, org.Name, org.CreatedAt)
 
 	if err != nil {
@@ -290,6 +290,13 @@ func (mds *ModelDaoSqlite) GetUser(ctx context.Context,
 
 func (mds *ModelDaoSqlite) GetUserByEmail(ctx context.Context,
 	email string) (*model.UserPayload, *model.ApiError) {
+
+	if email == "" {
+		return nil, &model.ApiError{
+			Typ: model.ErrorBadData,
+			Err: fmt.Errorf("empty email address"),
+		}
+	}
 
 	users := []model.UserPayload{}
 	query := `select

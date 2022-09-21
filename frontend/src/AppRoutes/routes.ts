@@ -13,6 +13,7 @@ import {
 	ErrorDetails,
 	InstrumentationPage,
 	LicensePage,
+	GettingStarted,
 	ListAllALertsPage,
 	Login,
 	Logs,
@@ -86,7 +87,7 @@ const routes: AppRoutes[] = [
 	{
 		path: ROUTES.INSTRUMENTATION,
 		exact: true,
-		component: InstrumentationPage,
+		component: GettingStarted,
 		isPrivate: true,
 		key: 'INSTRUMENTATION',
 	},
