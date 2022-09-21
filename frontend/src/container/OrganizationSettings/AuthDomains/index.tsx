@@ -11,7 +11,8 @@ import { ColumnsType } from 'antd/lib/table';
 import deleteDomain from 'api/SAML/deleteDomain';
 import listAllDomain from 'api/SAML/listAllDomain';
 import updateDomain from 'api/SAML/updateDomain';
-import useFeatureFlag from 'hooks/getFeatureFlag';
+import { FeatureKeys } from 'constants/featureKeys';
+import useFeatureFlag from 'hooks/useFeatureFlag';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from 'react-query';
@@ -26,7 +27,7 @@ import EditSaml, { EditFormProps } from './Edit';
 import { Container } from './styles';
 import SwitchComponent from './Switch';
 
-function SAMLSettings(): JSX.Element {
+function AuthDomains(): JSX.Element {
 	const { t } = useTranslation(['common', 'organizationsettings']);
 	const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 	const { org } = useSelector<AppState, AppReducer>((state) => state.app);
@@ -34,7 +35,7 @@ function SAMLSettings(): JSX.Element {
 	const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 	const [form] = useForm<EditFormProps>();
 
-	const [SSOFlag] = useFeatureFlag(['SSO'], 'SAML');
+	const SSOFlag = useFeatureFlag(FeatureKeys.SSO);
 
 	const { data, isLoading, refetch } = useQuery(['saml'], {
 		queryFn: () =>
@@ -309,4 +310,4 @@ function SAMLSettings(): JSX.Element {
 	);
 }
 
-export default SAMLSettings;
+export default AuthDomains;

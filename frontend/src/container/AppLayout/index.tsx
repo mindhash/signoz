@@ -1,5 +1,5 @@
 import { notification } from 'antd';
-import getFeaturesFlags from 'api/featureflag/getSAMLFeaturesFlags';
+import getFeatureFlags from 'api/features/getFeatureFlags';
 import getUserLatestVersion from 'api/user/getLatestVersion';
 import getUserVersion from 'api/user/getVersion';
 import Header from 'container/Header';
@@ -16,7 +16,7 @@ import AppActions from 'types/actions';
 import {
 	UPDATE_CURRENT_ERROR,
 	UPDATE_CURRENT_VERSION,
-	UPDATE_FEATURE_FLAGS_SAML,
+	UPDATE_FEATURE_FLAGS,
 	UPDATE_LATEST_VERSION,
 	UPDATE_LATEST_VERSION_ERROR,
 } from 'types/actions/app';
@@ -45,7 +45,7 @@ function AppLayout(props: AppLayoutProps): JSX.Element {
 			enabled: isLoggedIn,
 		},
 		{
-			queryFn: getFeaturesFlags,
+			queryFn: getFeatureFlags,
 			queryKey: 'getFeatureFlags',
 		},
 	]);
@@ -148,7 +148,7 @@ function AppLayout(props: AppLayoutProps): JSX.Element {
 			getFeaturesResponse.data.payload
 		) {
 			dispatch({
-				type: UPDATE_FEATURE_FLAGS_SAML,
+				type: UPDATE_FEATURE_FLAGS,
 				payload: {
 					...getFeaturesResponse.data.payload,
 				},
@@ -168,9 +168,11 @@ function AppLayout(props: AppLayoutProps): JSX.Element {
 		getUserLatestVersionResponse.isFetched,
 		getUserVersionResponse.isFetched,
 		getUserLatestVersionResponse.isSuccess,
+		getFeaturesResponse.isLoading,
+		getFeaturesResponse.isError,
+		getFeaturesResponse.data,
 		getFeaturesResponse.isFetched,
 		getFeaturesResponse.isSuccess,
-		getFeaturesResponse.data,
 	]);
 
 	const isToDisplayLayout = isLoggedIn;
