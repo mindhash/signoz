@@ -1,5 +1,5 @@
 import { notification } from 'antd';
-import getFeatureFlags from 'api/features/getFeatures';
+import getFeaturesFlags from 'api/features/getFeatureFlags';
 import getUserLatestVersion from 'api/user/getLatestVersion';
 import getUserVersion from 'api/user/getVersion';
 import Header from 'container/Header';
@@ -45,21 +45,22 @@ function AppLayout(props: AppLayoutProps): JSX.Element {
 			enabled: isLoggedIn,
 		},
 		{
-			queryFn: getFeatureFlags,
+			queryFn: getFeaturesFlags,
 			queryKey: 'getFeatureFlags',
 		},
 	]);
 
 	useEffect(() => {
+		if (getFeaturesResponse.status === 'idle') {
+			getFeaturesResponse.refetch();
+		}
+
 		if (getUserLatestVersionResponse.status === 'idle' && isLoggedIn) {
 			getUserLatestVersionResponse.refetch();
 		}
 
 		if (getUserVersionResponse.status === 'idle' && isLoggedIn) {
 			getUserVersionResponse.refetch();
-		}
-		if (getFeaturesResponse.status === 'idle') {
-			getFeaturesResponse.refetch();
 		}
 	}, [
 		getFeaturesResponse,
@@ -152,6 +153,20 @@ function AppLayout(props: AppLayoutProps): JSX.Element {
 				},
 			});
 		}
+
+		if (
+			getFeaturesResponse.isFetched &&
+			getFeaturesResponse.isSuccess &&
+			getFeaturesResponse.data &&
+			getFeaturesResponse.data.payload
+		) {
+			dispatch({
+				type: UPDATE_FEATURE_FLAGS,
+				payload: {
+					...getFeaturesResponse.data.payload,
+				},
+			});
+		}
 	}, [
 		dispatch,
 		isLoggedIn,
@@ -166,11 +181,6 @@ function AppLayout(props: AppLayoutProps): JSX.Element {
 		getUserLatestVersionResponse.isFetched,
 		getUserVersionResponse.isFetched,
 		getUserLatestVersionResponse.isSuccess,
-		getFeaturesResponse.isLoading,
-		getFeaturesResponse.isError,
-		getFeaturesResponse.data,
-		getFeaturesResponse.isFetched,
-		getFeaturesResponse.isSuccess,
 	]);
 
 	const isToDisplayLayout = isLoggedIn;
