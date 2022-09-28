@@ -291,6 +291,13 @@ func (mds *ModelDaoSqlite) GetUser(ctx context.Context,
 func (mds *ModelDaoSqlite) GetUserByEmail(ctx context.Context,
 	email string) (*model.UserPayload, *model.ApiError) {
 
+	if email == "" {
+		return nil, &model.ApiError{
+			Typ: model.ErrorBadData,
+			Err: fmt.Errorf("empty email address"),
+		}
+	}
+
 	users := []model.UserPayload{}
 	query := `select
 				u.id,
