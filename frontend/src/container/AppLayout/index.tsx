@@ -181,6 +181,9 @@ function AppLayout(props: AppLayoutProps): JSX.Element {
 		getUserLatestVersionResponse.isFetched,
 		getUserVersionResponse.isFetched,
 		getUserLatestVersionResponse.isSuccess,
+		getFeaturesResponse.isFetched,
+		getFeaturesResponse.isSuccess,
+		getFeaturesResponse.data,
 	]);
 
 	const isToDisplayLayout = isLoggedIn;
