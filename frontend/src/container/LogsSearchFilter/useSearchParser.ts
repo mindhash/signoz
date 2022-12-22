@@ -51,6 +51,7 @@ export function useSearchParser(): {
 
 	const updateParsedQuery = useCallback(
 		(updatedParsedPayload) => {
+			console.log(' updatedParsedPayload:', updatedParsedPayload);
 			dispatch({
 				type: SET_SEARCH_QUERY_PARSED_PAYLOAD,
 				payload: updatedParsedPayload,
