@@ -2308,3 +2308,16 @@ func (aH *APIHandler) logAggregate(w http.ResponseWriter, r *http.Request) {
 	}
 	aH.WriteJSON(w, r, res)
 }
+
+func AddUserToContext(ctx context.Context, r *http.Request) (context.Context, error) {
+	user, err := auth.GetUserFromRequest(r)
+	if err != nil {
+		return ctx, err
+	}
+	v := model.ApiContext{M: map[string]string{
+		model.ApiContextUserId: user.User.Id,
+	}}
+	fmt.Println(" key:", model.ApiContextKey(model.ApiContextKeyName))
+	fmt.Println("v:", v)
+	return context.WithValue(context.Background(), model.ApiContextKey(model.ApiContextKeyName), v), nil
+}
