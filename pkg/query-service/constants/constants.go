@@ -11,6 +11,7 @@ const (
 	HTTPHostPort    = "0.0.0.0:8080" // Address to serve http (query service)
 	PrivateHostPort = "0.0.0.0:8085" // Address to server internal services like alert manager
 	DebugHttpPort   = "0.0.0.0:6060" // Address to serve http (pprof)
+	OpAmpWsEndpoint = "0.0.0.0:4320" // address for opamp websocket
 )
 
 var ConfigSignozIo = "https://config.signoz.io/api/v1"
@@ -109,6 +110,24 @@ const (
 	DefaultLogSkipIndexType        = "bloom_filter(0.01)"
 	DefaultLogSkipIndexGranularity = 64
 )
+
+var GroupByColMap = map[string]struct{}{
+	ServiceName:        {},
+	HttpHost:           {},
+	HttpRoute:          {},
+	HttpUrl:            {},
+	HttpMethod:         {},
+	Component:          {},
+	OperationDB:        {},
+	DBName:             {},
+	DBOperation:        {},
+	DBSystem:           {},
+	MsgOperation:       {},
+	MsgSystem:          {},
+	RPCMethod:          {},
+	ResponseStatusCode: {},
+}
+
 const (
 	SIGNOZ_METRIC_DBNAME        = "signoz_metrics"
 	SIGNOZ_SAMPLES_TABLENAME    = "distributed_samples_v2"
@@ -195,3 +214,9 @@ const (
 // written clickhouse query. The column alias indcate which value is
 // to be considered as final result (or target)
 var ReservedColumnTargetAliases = map[string]bool{"result": true, "res": true, "value": true}
+
+const (
+	StringTagMapCol = "stringTagMap"
+	NumberTagMapCol = "numberTagMap"
+	BoolTagMapCol   = "boolTagMap"
+)

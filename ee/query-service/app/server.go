@@ -25,7 +25,10 @@ import (
 	licensepkg "go.signoz.io/signoz/ee/query-service/license"
 	"go.signoz.io/signoz/ee/query-service/usage"
 
+	"go.signoz.io/signoz/pkg/query-service/agentConf"
 	"go.signoz.io/signoz/pkg/query-service/app/dashboards"
+	"go.signoz.io/signoz/pkg/query-service/app/opamp"
+	opAmpModel "go.signoz.io/signoz/pkg/query-service/app/opamp/model"
 	baseconst "go.signoz.io/signoz/pkg/query-service/constants"
 	"go.signoz.io/signoz/pkg/query-service/healthcheck"
 	basealm "go.signoz.io/signoz/pkg/query-service/integrations/alertManager"
@@ -37,6 +40,8 @@ import (
 	"go.signoz.io/signoz/pkg/query-service/utils"
 	"go.uber.org/zap"
 )
+
+const AppDbEngine = "sqlite"
 
 type ServerOptions struct {
 	PromConfigPath  string
@@ -76,7 +81,7 @@ func (s Server) HealthCheckStatus() chan healthcheck.Status {
 // NewServer creates and initializes Server
 func NewServer(serverOptions *ServerOptions) (*Server, error) {
 
-	modelDao, err := dao.InitDao("sqlite", baseconst.RELATIONAL_DATASOURCE_PATH)
+	modelDao, err := dao.InitDao(AppDbEngine, baseconst.RELATIONAL_DATASOURCE_PATH)
 	if err != nil {
 		return nil, err
 	}
@@ -122,8 +127,19 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 		return nil, err
 	}
 
+	// initiate opamp
+	_, err = opAmpModel.InitDB(baseconst.RELATIONAL_DATASOURCE_PATH)
+	if err != nil {
+		return nil, err
+	}
+
+	// initiate agent config handler
+	if err := agentConf.Initiate(localDB, AppDbEngine); err != nil {
+		return nil, err
+	}
+
 	// start the usagemanager
-	usageManager, err := usage.New("sqlite", localDB, lm.GetRepo(), reader.GetConn())
+	usageManager, err := usage.New(AppDbEngine, localDB, lm.GetRepo(), reader.GetConn())
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +463,7 @@ func (s *Server) Start() error {
 	if port, err := utils.GetPort(s.privateConn.Addr()); err == nil {
 		privatePort = port
 	}
-	fmt.Println("starting private http")
+
 	go func() {
 		zap.S().Info("Starting Private HTTP server", zap.Int("port", privatePort), zap.String("addr", s.serverOptions.PrivateHostPort))
 
@@ -461,6 +477,15 @@ func (s *Server) Start() error {
 
 		s.unavailableChannel <- healthcheck.Unavailable
 
+	}()
+
+	go func() {
+		zap.S().Info("Starting OpAmp Websocket server", zap.String("addr", baseconst.OpAmpWsEndpoint))
+		err := opamp.InitalizeServer(baseconst.OpAmpWsEndpoint, &opAmpModel.AllAgents)
+		if err != nil {
+			zap.S().Info("opamp ws server failed to start", err)
+			s.unavailableChannel <- healthcheck.Unavailable
+		}
 	}()
 
 	return nil
