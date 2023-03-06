@@ -21,6 +21,7 @@ import (
 	"go.signoz.io/signoz/ee/query-service/app/api"
 	"go.signoz.io/signoz/ee/query-service/app/db"
 	"go.signoz.io/signoz/ee/query-service/dao"
+	"go.signoz.io/signoz/ee/query-service/ingestionRules"
 	"go.signoz.io/signoz/ee/query-service/interfaces"
 	licensepkg "go.signoz.io/signoz/ee/query-service/license"
 	"go.signoz.io/signoz/ee/query-service/usage"
@@ -127,6 +128,12 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 		return nil, err
 	}
 
+	// ingestion rules manager
+	ingestionController, err := ingestionRules.NewIngestionController(localDB, AppDbEngine)
+	if err != nil {
+		return nil, err
+	}
+
 	// initiate opamp
 	_, err = opAmpModel.InitDB(baseconst.RELATIONAL_DATASOURCE_PATH)
 	if err != nil {
@@ -151,11 +158,12 @@ func NewServer(serverOptions *ServerOptions) (*Server, error) {
 	telemetry.GetInstance().SetReader(reader)
 
 	apiOpts := api.APIHandlerOptions{
-		DataConnector:  reader,
-		AppDao:         modelDao,
-		RulesManager:   rm,
-		FeatureFlags:   lm,
-		LicenseManager: lm,
+		DataConnector:       reader,
+		AppDao:              modelDao,
+		RulesManager:        rm,
+		FeatureFlags:        lm,
+		LicenseManager:      lm,
+		IngestionController: ingestionController,
 	}
 
 	apiHandler, err := api.NewAPIHandler(apiOpts)
