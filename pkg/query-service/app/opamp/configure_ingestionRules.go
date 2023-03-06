@@ -40,7 +40,7 @@ func UpsertControlProcessors(ctx context.Context, signal string, processors map[
 
 	// flag to indicate if LB needs to be setup
 	withLB := false
-	if len(agents) > 0 {
+	if len(agents) > 1 {
 		withLB = true
 	}
 
