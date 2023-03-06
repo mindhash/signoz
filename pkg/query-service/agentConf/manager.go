@@ -161,7 +161,7 @@ func UpsertFilterProcessor(ctx context.Context, version int, config *filterproce
 		zap.S().Warnf("unexpected error while transforming processor config to yaml", err)
 	}
 
-	m.updateDeployStatus(ctx, ElementTypeSamplingRules, version, string(DeployInitiated), "Deployment started", configHash, string(processorConfYaml))
+	m.updateDeployStatus(ctx, ElementTypeDropRules, version, string(DeployInitiated), "Deployment started", configHash, string(processorConfYaml))
 	return nil
 }
 
