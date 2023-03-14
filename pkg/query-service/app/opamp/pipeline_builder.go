@@ -10,33 +10,54 @@ import (
 var lockTracesPipelineSpec sync.RWMutex
 var lockMetricsPipelineSpec sync.RWMutex
 
-type pipelineStatus struct {
-	Name    string
-	Enabled bool
+type pipelineElement struct {
+	Name string
+
+	// disabled when set to true,  removes the processor the agent pipeline
+	// not used when Anchor = true
+	Disabled bool
+
+	// indicates the element will not alter agent pipeline but
+	// will be used just to position other processors
+	// e.g. In ["batch", "signoz_tail_sampling"], we would want
+	// to use batch as anchor such that even if batch does not exist in
+	// agent pipeline, we dont make an effort to add it. neither
+	// we remove batch from the agent pipeline if it is disabled here
+	// we just use position of batch (0) to put signoz_tail_sampling
+	// next to it
+	Anchor bool
 }
 
-var tracesPipelineSpec = map[int]pipelineStatus{
+var tracesPipelineSpec = map[int]pipelineElement{
 	0: {
-		Name:    "signoz_tail_sampling",
-		Enabled: false,
+		Name: "signoz_tail_sampling",
+		// will be disabled, until first sampling rule is set
+		Disabled: true,
 	},
 	1: {
-		Name:    "batch",
-		Enabled: true,
+		Name: "batch",
+		// if batch processor doesnt exist in agent pipeline
+		// we dont want to force add it.
+		Anchor: true,
 	},
 }
 
-var metricsPipelineSpec = map[int]pipelineStatus{
+var metricsPipelineSpec = map[int]pipelineElement{
 	0: {
-		Name:    "filter",
-		Enabled: false,
+		Name: "filter",
+		// will be disabled, until first drop rule is set
+		Disabled: true,
 	},
 	1: {
-		Name:    "batch",
-		Enabled: true,
+		Name: "batch",
+		// if batch processor doesnt exist in agent pipeline
+		// we dont want to force add it
+		Anchor: true,
 	},
 }
 
+// updatePipelineSpec would be important mainly for scenarios
+// where default condition of  processor is false (e.g. signoz_tail_sampling)
 func updatePipelineSpec(signal string, name string, enabled bool) {
 	switch signal {
 	case "metrics":
@@ -46,7 +67,7 @@ func updatePipelineSpec(signal string, name string, enabled bool) {
 		for i := 0; i < len(metricsPipelineSpec); i++ {
 			p := metricsPipelineSpec[i]
 			if p.Name == name {
-				p.Enabled = enabled
+				p.Disabled = !enabled
 				metricsPipelineSpec[i] = p
 			}
 		}
@@ -57,7 +78,7 @@ func updatePipelineSpec(signal string, name string, enabled bool) {
 		for i := 0; i < len(tracesPipelineSpec); i++ {
 			p := tracesPipelineSpec[i]
 			if p.Name == name {
-				p.Enabled = enabled
+				p.Disabled = !enabled
 				tracesPipelineSpec[i] = p
 			}
 		}
@@ -102,7 +123,7 @@ func checkDuplicates(pipeline []interface{}) bool {
 }
 
 func buildPipeline(signal Signal, current []interface{}) ([]interface{}, error) {
-	var spec map[int]pipelineStatus
+	var spec map[int]pipelineElement
 
 	switch signal {
 	case Metrics:
@@ -118,7 +139,9 @@ func buildPipeline(signal Signal, current []interface{}) ([]interface{}, error) 
 	}
 
 	pipeline := current
+
 	// create a reverse map of existing config processors and their position
+	// e.g. [spanmetrics, batch] will become {batch: 1, spanmetrics: 0}
 	existing := map[string]int{}
 	for i, p := range current {
 		name := p.(string)
@@ -126,7 +149,13 @@ func buildPipeline(signal Signal, current []interface{}) ([]interface{}, error) 
 	}
 
 	// create mapping from our tracesPipelinePlan (processors managed by us) to position in existing processors (from current config)
-	// this means, if "batch" holds position 3 in the current effective config, and 2 in our config, the map will be [2]: 3
+	// for example: when
+	// 		colletor config: ["spanmetrics", "batch"]
+	// 		tracesPipelineSpec: ["signoz_tail_sampling", "batch"]
+	// the map result will be
+	// 		{"batch": 1}
+	// the processor from our spec signoz_tail_sampling is missing
+	// in collector config, so it will not have an entry in this map
 	specVsExistingMap := map[int]int{}
 
 	// go through plan and map its elements to current positions in effective config
@@ -136,20 +165,32 @@ func buildPipeline(signal Signal, current []interface{}) ([]interface{}, error) 
 		}
 	}
 
+	// lastMatched is pointer to last element from spec that
+	// matched to current config in collector.
 	lastMatched := -1
+
+	// inserts keeps track of new additions that happen in the
+	// processor list. it is useful in situations like below:
+	// we store map of our expected spec vs current collector pipeline
+	// in specVsExistingMap.  but, during the below loop
+	// we also add elements to collector pipeline, hence
+	// we need the indexes from specVsExistingMap to include new inserts
 	inserts := 0
 
-	// go through plan again in the increasing order
+	// go through processer from pipeline spec (our expected order)
+	// in the increasing order
 	for i := 0; i < len(spec); i++ {
 		m := spec[i]
 
 		if loc, ok := specVsExistingMap[i]; ok {
-			// element from plan already exists in current effective config.
+			// processor already exists in the config
 
+			// inserts accomodate for already made changes in prior loop
 			currentPos := loc + inserts
+
 			// if disabled then remove from the pipeline
-			if !m.Enabled {
-				zap.S().Debugf("build_pipeline: found a disabled item, removing from pipeline at position", currentPos-1, " ", m.Name)
+			if m.Disabled {
+				zap.S().Debug("build_pipeline: found a disabled item, removing from pipeline at position", currentPos-1, " ", m.Name)
 				if currentPos-1 <= 0 {
 					pipeline = pipeline[currentPos+1:]
 				} else {
@@ -162,7 +203,7 @@ func buildPipeline(signal Signal, current []interface{}) ([]interface{}, error) 
 			lastMatched = currentPos
 
 		} else {
-			if m.Enabled {
+			if !m.Anchor {
 				// track inserts as they shift the elements in pipeline
 				inserts++
 
@@ -170,10 +211,10 @@ func buildPipeline(signal Signal, current []interface{}) ([]interface{}, error) 
 				// right after last matched processsor (e.g. insert filters after tail_sampling for existing list of [batch, tail_sampling])
 
 				if lastMatched <= 0 {
-					zap.S().Debugf("build_pipeline: found a new item to be inserted, inserting at position 0:", m.Name)
+					zap.S().Debug("build_pipeline: found a new item to be inserted, inserting at position 0:", m.Name)
 					pipeline = append([]interface{}{m.Name}, pipeline[lastMatched+1:]...)
 				} else {
-					zap.S().Debugf("build_pipeline: found a new item to be inserted, inserting at position :", lastMatched, " ", m.Name)
+					zap.S().Debug("build_pipeline: found a new item to be inserted, inserting at position :", lastMatched, " ", m.Name)
 					prior := make([]interface{}, len(pipeline[:lastMatched]))
 					next := make([]interface{}, len(pipeline[lastMatched:]))
 					copy(prior, pipeline[:lastMatched])
